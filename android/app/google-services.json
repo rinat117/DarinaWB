@@ -1,0 +1,30 @@
+{
+  "project_info": {
+    "project_number": "597764858719",
+    "firebase_url": "https://darinawbdb-default-rtdb.firebaseio.com",
+    "project_id": "darinawbdb",
+    "storage_bucket": "darinawbdb.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:597764858719:android:8b350c300eb04562c74cea",
+        "android_client_info": {
+          "package_name": "com.example.myapp"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAKar1ov7rM2H_8BLyry8cU2NTRd_djKQM"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
