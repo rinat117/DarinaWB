@@ -1,8 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_database/firebase_database.dart';
 import 'package:carousel_slider/carousel_slider.dart';
-import '../widgets/pickup_point_card.dart'; // Импорт карточки
+import '../widgets/pickup_point_card.dart';
 import 'home_screen.dart';
+import 'package:firebase_auth/firebase_auth.dart'; // Import Firebase Auth
 
 class PickupPoint {
   final String id;
@@ -13,7 +14,9 @@ class PickupPoint {
 }
 
 class PickupSelectionScreen extends StatefulWidget {
-  const PickupSelectionScreen({super.key});
+  final UserCredential userCredential; // Add UserCredential
+  const PickupSelectionScreen({Key? key, required this.userCredential})
+      : super(key: key);
 
   @override
   State<PickupSelectionScreen> createState() => _PickupSelectionScreenState();
@@ -21,9 +24,9 @@ class PickupSelectionScreen extends StatefulWidget {
 
 class _PickupSelectionScreenState extends State<PickupSelectionScreen> {
   List<PickupPoint> _pickupPoints = [];
-  List<PickupPoint> _filteredPickupPoints = []; // Для поиска
+  List<PickupPoint> _filteredPickupPoints = [];
   bool _loading = true;
-  String _searchQuery = ''; // Для хранения поискового запроса
+  String _searchQuery = '';
 
   @override
   void initState() {
@@ -50,7 +53,7 @@ class _PickupSelectionScreenState extends State<PickupSelectionScreen> {
       });
       setState(() {
         _pickupPoints = loadedPickupPoints;
-        _filteredPickupPoints = loadedPickupPoints; // Изначально все пункты
+        _filteredPickupPoints = loadedPickupPoints;
         _loading = false;
       });
     } else {
@@ -65,8 +68,7 @@ class _PickupSelectionScreenState extends State<PickupSelectionScreen> {
     setState(() {
       _searchQuery = query;
       if (query.isEmpty) {
-        _filteredPickupPoints =
-            _pickupPoints; // Если запрос пустой - показываем все
+        _filteredPickupPoints = _pickupPoints;
       } else {
         _filteredPickupPoints = _pickupPoints
             .where((point) =>
@@ -82,34 +84,30 @@ class _PickupSelectionScreenState extends State<PickupSelectionScreen> {
     return Scaffold(
       appBar: AppBar(
         title: const Text('Выберите пункт выдачи'),
-        backgroundColor: Colors.deepPurple, // Цвет AppBar
+        backgroundColor: Colors.deepPurple,
       ),
-      backgroundColor: Colors.grey[100], // Светлый фон экрана
+      backgroundColor: Colors.grey[100],
       body: _loading
           ? const Center(child: CircularProgressIndicator())
           : _pickupPoints.isEmpty
               ? const Center(child: Text('Нет доступных пунктов выдачи'))
               : Padding(
                   padding: const EdgeInsets.symmetric(
-                      horizontal: 16.0, vertical: 20.0), // Отступы больше
+                      horizontal: 16.0, vertical: 20.0),
                   child: Column(
                     children: [
                       Padding(
-                        padding: const EdgeInsets.only(
-                            bottom: 16.0), // Отступ под поиском
+                        padding: const EdgeInsets.only(bottom: 16.0),
                         child: TextField(
                           decoration: InputDecoration(
-                            hintText: 'Поиск пункта выдачи', // Используем hintText
+                            hintText: 'Поиск пункта выдачи',
                             prefixIcon: const Icon(Icons.search,
-                                color: Colors
-                                    .deepPurple), // Иконка поиска фирменного цвета
+                                color: Colors.deepPurple),
                             border: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(
-                                  25.0), // Больше скругление поля поиска
+                              borderRadius: BorderRadius.circular(25.0),
                               borderSide: BorderSide(color: Colors.grey[400]!),
                             ),
                             focusedBorder: OutlineInputBorder(
-                              // Цвет рамки при фокусе
                               borderRadius: BorderRadius.circular(25.0),
                               borderSide: const BorderSide(
                                   color: Colors.deepPurple, width: 2.0),
@@ -117,12 +115,13 @@ class _PickupSelectionScreenState extends State<PickupSelectionScreen> {
                             contentPadding: const EdgeInsets.symmetric(
                                 vertical: 15.0, horizontal: 20.0),
                             filled: true,
-                            fillColor: Colors.white, // Белый фон поля поиска
+                            fillColor: Colors.white,
                           ),
                           onChanged: _filterPickupPoints,
                         ),
                       ),
-                      if (_searchQuery.isNotEmpty && _filteredPickupPoints.isEmpty)
+                      if (_searchQuery.isNotEmpty &&
+                          _filteredPickupPoints.isEmpty)
                         const Padding(
                           padding: EdgeInsets.only(bottom: 16.0),
                           child: Text(
@@ -136,17 +135,16 @@ class _PickupSelectionScreenState extends State<PickupSelectionScreen> {
                       Expanded(
                         child: CarouselSlider(
                           options: CarouselOptions(
-                            height: 220.0, // Увеличили высоту карусели
+                            height: 220.0,
                             enlargeCenterPage: true,
                             autoPlay: false,
                             aspectRatio: 16 / 9,
                             enableInfiniteScroll: false,
                             viewportFraction: 0.8,
                             initialPage: 0,
-                            scrollDirection: Axis.vertical, // Вертикальный скролл
+                            scrollDirection: Axis.vertical,
                           ),
                           items: _filteredPickupPoints.map((pickupPoint) {
-                            // Используем _filteredPickupPoints
                             return Builder(
                               builder: (BuildContext context) {
                                 return PickupPointCard(
@@ -156,7 +154,9 @@ class _PickupSelectionScreenState extends State<PickupSelectionScreen> {
                                       context,
                                       MaterialPageRoute(
                                         builder: (context) => HomeScreen(
-                                            pickupPointId: pickupPoint.id),
+                                            pickupPointId: pickupPoint.id,
+                                            userCredential: widget
+                                                .userCredential), // Pass userCredential
                                       ),
                                     );
                                   },

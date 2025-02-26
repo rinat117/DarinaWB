@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
-import 'package:firebase_core/firebase_core.dart'; // Adjust the path if necessary
+import 'package:firebase_core/firebase_core.dart';
 import 'package:myapp/firebase_options.dart';
-import 'screens/pickup_selection_screen.dart';
+import 'screens/login_screen.dart'; // Import LoginScreen
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -12,7 +12,7 @@ void main() async {
 }
 
 class MyApp extends StatelessWidget {
-  const MyApp({super.key});
+  const MyApp({Key? key}) : super(key: key);
 
   @override
   Widget build(BuildContext context) {
@@ -22,7 +22,7 @@ class MyApp extends StatelessWidget {
         colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepPurple),
         useMaterial3: true,
       ),
-      home: const PickupSelectionScreen(),
+      home: const LoginScreen(), // Set LoginScreen as the home
     );
   }
 }

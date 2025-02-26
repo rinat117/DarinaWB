@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_database/firebase_database.dart';
+import 'package:firebase_auth/firebase_auth.dart'; // Import Firebase Auth
 
 class PickupPoint {
   final int id;
@@ -35,7 +36,9 @@ class News {
 
 class HomeScreen extends StatefulWidget {
   final String? pickupPointId;
-  const HomeScreen({super.key, this.pickupPointId});
+  final UserCredential userCredential; // Add UserCredential
+  const HomeScreen({Key? key, this.pickupPointId, required this.userCredential})
+      : super(key: key);
 
   @override
   State<HomeScreen> createState() => _HomeScreenState();
@@ -51,6 +54,8 @@ class _HomeScreenState extends State<HomeScreen> {
     super.initState();
     _pickupPointId = widget.pickupPointId;
     _loadData();
+    // Access user information from widget.userCredential
+    print('User ID: ${widget.userCredential.user?.uid}'); // Example
   }
 
   Future<void> _loadData() async {

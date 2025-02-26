@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
-import './home_screen.dart'; // Импортируем HomeScreen
+import 'package:firebase_auth/firebase_auth.dart'; // Import Firebase Auth
+import 'home_screen.dart'; // Import HomeScreen
 
 class MainScreen extends StatefulWidget {
-  const MainScreen({super.key});
+  final UserCredential userCredential; // Add UserCredential
+  const MainScreen({Key? key, required this.userCredential}) : super(key: key);
 
   @override
   State<MainScreen> createState() => _MainScreenState();
@@ -11,12 +13,18 @@ class MainScreen extends StatefulWidget {
 class _MainScreenState extends State<MainScreen> {
   int _selectedIndex = 0;
 
-  static const List<Widget> _widgetOptions = <Widget>[
-    HomeScreen(), // HomeScreen на первом табе
-    Text('Чат'), // Заглушка для чата
-    Text('Информация'), // Заглушка для информации
-    Text('Профиль'), // Заглушка для профиля
-  ];
+  late List<Widget> _widgetOptions; // Declare as late
+
+  @override
+  void initState() {
+    super.initState();
+    _widgetOptions = <Widget>[
+      HomeScreen(userCredential: widget.userCredential), // Pass userCredential
+      const Text('Чат'), // Placeholder for chat
+      const Text('Информация'), // Placeholder for information
+      const Text('Профиль'), // Placeholder for profile
+    ];
+  }
 
   void _onItemTapped(int index) {
     setState(() {
@@ -53,7 +61,7 @@ class _MainScreenState extends State<MainScreen> {
           ),
         ],
         currentIndex: _selectedIndex,
-        selectedItemColor: Colors.blue, // Цвет выбранного элемента
+        selectedItemColor: Colors.blue,
         onTap: _onItemTapped,
       ),
     );
