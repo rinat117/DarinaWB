@@ -36,9 +36,8 @@ class News {
 
 class HomeScreen extends StatefulWidget {
   final String? pickupPointId;
-  final UserCredential userCredential; // Add UserCredential
-  const HomeScreen({Key? key, this.pickupPointId, required this.userCredential})
-      : super(key: key);
+  final User? user; // Изменили на User
+  const HomeScreen({Key? key, this.pickupPointId, this.user}) : super(key: key);
 
   @override
   State<HomeScreen> createState() => _HomeScreenState();
@@ -54,8 +53,10 @@ class _HomeScreenState extends State<HomeScreen> {
     super.initState();
     _pickupPointId = widget.pickupPointId;
     _loadData();
-    // Access user information from widget.userCredential
-    print('User ID: ${widget.userCredential.user?.uid}'); // Example
+    // Access user information from widget.user
+    if (widget.user != null) {
+      print('User ID: ${widget.user!.uid}'); // Example
+    }
   }
 
   Future<void> _loadData() async {

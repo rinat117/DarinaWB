@@ -3,8 +3,8 @@ import 'package:firebase_auth/firebase_auth.dart'; // Import Firebase Auth
 import 'home_screen.dart'; // Import HomeScreen
 
 class MainScreen extends StatefulWidget {
-  final UserCredential userCredential; // Add UserCredential
-  const MainScreen({Key? key, required this.userCredential}) : super(key: key);
+  final User? user; // Изменили на User
+  const MainScreen({Key? key, this.user}) : super(key: key);
 
   @override
   State<MainScreen> createState() => _MainScreenState();
@@ -19,7 +19,7 @@ class _MainScreenState extends State<MainScreen> {
   void initState() {
     super.initState();
     _widgetOptions = <Widget>[
-      HomeScreen(userCredential: widget.userCredential), // Pass userCredential
+      HomeScreen(user: widget.user), // Pass user
       const Text('Чат'), // Placeholder for chat
       const Text('Информация'), // Placeholder for information
       const Text('Профиль'), // Placeholder for profile

@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_database/firebase_database.dart';
 import 'package:carousel_slider/carousel_slider.dart';
+import 'package:firebase_auth/firebase_auth.dart'; // Добавляем этот импорт
 import '../widgets/pickup_point_card.dart';
 import 'home_screen.dart';
-import 'package:firebase_auth/firebase_auth.dart'; // Import Firebase Auth
 
 class PickupPoint {
   final String id;
@@ -14,9 +14,8 @@ class PickupPoint {
 }
 
 class PickupSelectionScreen extends StatefulWidget {
-  final UserCredential userCredential; // Add UserCredential
-  const PickupSelectionScreen({Key? key, required this.userCredential})
-      : super(key: key);
+  final User? user; // Теперь Dart знает, что такое User
+  const PickupSelectionScreen({Key? key, this.user}) : super(key: key);
 
   @override
   State<PickupSelectionScreen> createState() => _PickupSelectionScreenState();
@@ -32,6 +31,10 @@ class _PickupSelectionScreenState extends State<PickupSelectionScreen> {
   void initState() {
     super.initState();
     _loadPickupPoints();
+    // Можно логировать пользователя, если нужно
+    if (widget.user != null) {
+      print('User logged in: ${widget.user!.uid}');
+    }
   }
 
   Future<void> _loadPickupPoints() async {
@@ -154,9 +157,10 @@ class _PickupSelectionScreenState extends State<PickupSelectionScreen> {
                                       context,
                                       MaterialPageRoute(
                                         builder: (context) => HomeScreen(
-                                            pickupPointId: pickupPoint.id,
-                                            userCredential: widget
-                                                .userCredential), // Pass userCredential
+                                          pickupPointId: pickupPoint.id,
+                                          user: widget
+                                              .user, // Передаем User в HomeScreen
+                                        ),
                                       ),
                                     );
                                   },
