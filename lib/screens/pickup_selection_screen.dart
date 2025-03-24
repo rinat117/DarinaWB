@@ -1,21 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_database/firebase_database.dart';
-import 'package:carousel_slider/carousel_slider.dart';
-import 'package:firebase_auth/firebase_auth.dart'; // Добавляем этот импорт
-import '../widgets/pickup_point_card.dart';
-import 'home_screen.dart';
-
-class PickupPoint {
-  final String id;
-  final String name;
-  final String address;
-
-  PickupPoint({required this.id, required this.name, required this.address});
-}
+import 'package:firebase_auth/firebase_auth.dart';
+import '../models/pickup_point.dart';
+import 'dashboard_screen.dart'; // Импортируем новый экран
 
 class PickupSelectionScreen extends StatefulWidget {
-  final User? user; // Теперь Dart знает, что такое User
-  const PickupSelectionScreen({Key? key, this.user}) : super(key: key);
+  const PickupSelectionScreen({super.key});
 
   @override
   State<PickupSelectionScreen> createState() => _PickupSelectionScreenState();
@@ -23,63 +13,62 @@ class PickupSelectionScreen extends StatefulWidget {
 
 class _PickupSelectionScreenState extends State<PickupSelectionScreen> {
   List<PickupPoint> _pickupPoints = [];
-  List<PickupPoint> _filteredPickupPoints = [];
-  bool _loading = true;
-  String _searchQuery = '';
+  bool _isLoading = true;
 
   @override
   void initState() {
     super.initState();
     _loadPickupPoints();
-    // Можно логировать пользователя, если нужно
-    if (widget.user != null) {
-      print('User logged in: ${widget.user!.uid}');
-    }
   }
 
   Future<void> _loadPickupPoints() async {
-    final databaseReference = FirebaseDatabase.instance.ref();
-    final pickupPointsSnapshot =
-        await databaseReference.child('pickup_points').get();
+    try {
+      final databaseReference = FirebaseDatabase.instance.ref();
+      final snapshot = await databaseReference.child('pickup_points').get();
 
-    if (pickupPointsSnapshot.exists) {
-      final pickupPointsMap =
-          pickupPointsSnapshot.value as Map<dynamic, dynamic>;
-      final List<PickupPoint> loadedPickupPoints = [];
-      pickupPointsMap.forEach((key, value) {
-        final pickupPointData = value as Map<dynamic, dynamic>;
-        loadedPickupPoints.add(PickupPoint(
-          id: key,
-          name: pickupPointData['name'] as String,
-          address: pickupPointData['address'] as String,
-        ));
-      });
-      setState(() {
-        _pickupPoints = loadedPickupPoints;
-        _filteredPickupPoints = loadedPickupPoints;
-        _loading = false;
-      });
-    } else {
-      setState(() {
-        _loading = false;
-      });
-      print('No pickup points found');
-    }
-  }
+      if (snapshot.exists) {
+        final data = snapshot.value as Map<dynamic, dynamic>;
+        List<PickupPoint> pickupPoints = [];
+        data.forEach((key, value) {
+          final idString = key.toString().replaceAll('pickup_point_', '');
+          int id;
+          try {
+            id = int.parse(idString);
+          } catch (e) {
+            print("Error parsing ID from key $key: $e");
+            return;
+          }
 
-  void _filterPickupPoints(String query) {
-    setState(() {
-      _searchQuery = query;
-      if (query.isEmpty) {
-        _filteredPickupPoints = _pickupPoints;
+          pickupPoints.add(PickupPoint(
+            id: id,
+            name: value['name'],
+            address: value['address'],
+            phone: value['phone'],
+            workingHours: value['working_hours'],
+            latitude: (value['latitude'] is String)
+                ? double.parse(value['latitude'])
+                : value['latitude'].toDouble(),
+            longitude: (value['longitude'] is String)
+                ? double.parse(value['longitude'])
+                : value['longitude'].toDouble(),
+          ));
+        });
+        setState(() {
+          _pickupPoints = pickupPoints;
+          _isLoading = false;
+        });
       } else {
-        _filteredPickupPoints = _pickupPoints
-            .where((point) =>
-                point.name.toLowerCase().contains(query.toLowerCase()) ||
-                point.address.toLowerCase().contains(query.toLowerCase()))
-            .toList();
+        print("No pickup points found in the database");
+        setState(() {
+          _isLoading = false;
+        });
       }
-    });
+    } catch (e) {
+      print("Error loading pickup points: $e");
+      setState(() {
+        _isLoading = false;
+      });
+    }
   }
 
   @override
@@ -89,89 +78,32 @@ class _PickupSelectionScreenState extends State<PickupSelectionScreen> {
         title: const Text('Выберите пункт выдачи'),
         backgroundColor: Colors.deepPurple,
       ),
-      backgroundColor: Colors.grey[100],
-      body: _loading
+      body: _isLoading
           ? const Center(child: CircularProgressIndicator())
           : _pickupPoints.isEmpty
-              ? const Center(child: Text('Нет доступных пунктов выдачи'))
-              : Padding(
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 16.0, vertical: 20.0),
-                  child: Column(
-                    children: [
-                      Padding(
-                        padding: const EdgeInsets.only(bottom: 16.0),
-                        child: TextField(
-                          decoration: InputDecoration(
-                            hintText: 'Поиск пункта выдачи',
-                            prefixIcon: const Icon(Icons.search,
-                                color: Colors.deepPurple),
-                            border: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(25.0),
-                              borderSide: BorderSide(color: Colors.grey[400]!),
+              ? const Center(child: Text('Пункты выдачи не найдены'))
+              : ListView.builder(
+                  itemCount: _pickupPoints.length,
+                  itemBuilder: (context, index) {
+                    final pickupPoint = _pickupPoints[index];
+                    return Card(
+                      child: ListTile(
+                        title: Text(pickupPoint.name),
+                        subtitle: Text(pickupPoint.address),
+                        onTap: () {
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (context) => DashboardScreen(
+                                pickupPointId: 'pickup_point_${pickupPoint.id}',
+                                user: FirebaseAuth.instance.currentUser!,
+                              ),
                             ),
-                            focusedBorder: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(25.0),
-                              borderSide: const BorderSide(
-                                  color: Colors.deepPurple, width: 2.0),
-                            ),
-                            contentPadding: const EdgeInsets.symmetric(
-                                vertical: 15.0, horizontal: 20.0),
-                            filled: true,
-                            fillColor: Colors.white,
-                          ),
-                          onChanged: _filterPickupPoints,
-                        ),
+                          );
+                        },
                       ),
-                      if (_searchQuery.isNotEmpty &&
-                          _filteredPickupPoints.isEmpty)
-                        const Padding(
-                          padding: EdgeInsets.only(bottom: 16.0),
-                          child: Text(
-                            'Пункты выдачи не найдены',
-                            style: TextStyle(
-                              color: Colors.grey,
-                              fontStyle: FontStyle.italic,
-                            ),
-                          ),
-                        ),
-                      Expanded(
-                        child: CarouselSlider(
-                          options: CarouselOptions(
-                            height: 220.0,
-                            enlargeCenterPage: true,
-                            autoPlay: false,
-                            aspectRatio: 16 / 9,
-                            enableInfiniteScroll: false,
-                            viewportFraction: 0.8,
-                            initialPage: 0,
-                            scrollDirection: Axis.vertical,
-                          ),
-                          items: _filteredPickupPoints.map((pickupPoint) {
-                            return Builder(
-                              builder: (BuildContext context) {
-                                return PickupPointCard(
-                                  pickupPoint: pickupPoint,
-                                  onTap: () {
-                                    Navigator.pushReplacement(
-                                      context,
-                                      MaterialPageRoute(
-                                        builder: (context) => HomeScreen(
-                                          pickupPointId: pickupPoint.id,
-                                          user: widget
-                                              .user, // Передаем User в HomeScreen
-                                        ),
-                                      ),
-                                    );
-                                  },
-                                );
-                              },
-                            );
-                          }).toList(),
-                        ),
-                      ),
-                    ],
-                  ),
+                    );
+                  },
                 ),
     );
   }

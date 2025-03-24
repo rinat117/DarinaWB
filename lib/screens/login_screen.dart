@@ -1,104 +1,65 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'employee_home_screen.dart';
+import 'package:email_validator/email_validator.dart';
 import 'pickup_selection_screen.dart';
+import 'employee_home_screen.dart';
 
 class LoginScreen extends StatefulWidget {
-  const LoginScreen({Key? key}) : super(key: key);
+  const LoginScreen({super.key});
 
   @override
   State<LoginScreen> createState() => _LoginScreenState();
 }
 
 class _LoginScreenState extends State<LoginScreen> {
-  final _inputController = TextEditingController();
+  final _formKey = GlobalKey<FormState>();
+  final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
-  final _codeController = TextEditingController();
-  String? _verificationId; // Для хранения ID верификации телефона
-  bool _isLoading = false;
-  bool _showPasswordField = false; // Показывать поле пароля для сотрудников
-  bool _showCodeField = false; // Показывать поле кода для клиентов
-  String _inputType = ''; // 'email' или 'phone'
+  final _phoneController = TextEditingController();
+  final _smsCodeController = TextEditingController();
+  bool _isCustomer = false;
+  bool _isCodeSent = false;
+  String? _verificationId;
+  String? _errorMessage;
 
   @override
   void dispose() {
-    _inputController.dispose();
+    _emailController.dispose();
     _passwordController.dispose();
-    _codeController.dispose();
+    _phoneController.dispose();
+    _smsCodeController.dispose();
     super.dispose();
   }
 
-  // Проверка ввода: email или телефон
-  void _checkInput(String value) {
-    setState(() {
-      _showPasswordField = false;
-      _showCodeField = false;
-      _inputType = '';
-
-      if (value.endsWith('@wbpvz.com')) {
-        _inputType = 'email';
-        _showPasswordField = true;
-      } else if (RegExp(r'^\+?\d{10,15}$').hasMatch(value) ||
-          RegExp(r'^\d{10,15}$').hasMatch(value)) {
-        _inputType = 'phone';
-        _showCodeField =
-            true; // Сначала покажем поле для кода, но отправим SMS позже
-      }
-    });
-  }
-
-  // Вход сотрудников через email и пароль
-  Future<void> _loginWithEmail(BuildContext context) async {
-    setState(() => _isLoading = true);
-    try {
-      final email = _inputController.text.trim();
-      final password = _passwordController.text.trim();
-      final userCredential =
-          await FirebaseAuth.instance.signInWithEmailAndPassword(
-        email: email,
-        password: password,
-      );
-      Navigator.pushReplacement(
-        context,
-        MaterialPageRoute(builder: (context) => const EmployeeHomeScreen()),
-      );
-    } on FirebaseAuthException catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Ошибка: ${e.message}')),
-      );
-    } finally {
-      setState(() => _isLoading = false);
+  Future<void> _sendCodeToPhoneNumber() async {
+    String phoneNumber = _phoneController.text.trim();
+    if (!phoneNumber.startsWith('+')) {
+      phoneNumber = '+7$phoneNumber';
     }
-  }
 
-  // Отправка SMS для входа по телефону
-  Future<void> _sendSMS(BuildContext context) async {
-    setState(() => _isLoading = true);
     try {
-      String phoneNumber = _inputController.text.trim();
-      // Если пользователь ввёл номер без +, добавляем его
-      if (!phoneNumber.startsWith('+')) {
-        phoneNumber =
-            '+7$phoneNumber'; // Предполагаем, что это российский номер
-      }
       await FirebaseAuth.instance.verifyPhoneNumber(
         phoneNumber: phoneNumber,
         verificationCompleted: (PhoneAuthCredential credential) async {
-          final userCredential =
-              await FirebaseAuth.instance.signInWithCredential(credential);
-          _navigateToPickupSelection(context, userCredential);
+          await FirebaseAuth.instance.signInWithCredential(credential);
+          if (mounted) {
+            Navigator.pushReplacement(
+              context,
+              MaterialPageRoute(
+                  builder: (context) => const PickupSelectionScreen()),
+            );
+          }
         },
         verificationFailed: (FirebaseAuthException e) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Ошибка верификации: ${e.message}')),
-          );
-          setState(() => _isLoading = false);
+          setState(() {
+            _errorMessage = 'Ошибка отправки кода: ${e.message}';
+          });
         },
         codeSent: (String verificationId, int? resendToken) {
           setState(() {
+            _isCodeSent = true;
             _verificationId = verificationId;
-            _isLoading = false;
-            _showCodeField = true; // Показываем поле для кода
+            _errorMessage = null;
           });
         },
         codeAutoRetrievalTimeout: (String verificationId) {
@@ -106,148 +67,197 @@ class _LoginScreenState extends State<LoginScreen> {
         },
       );
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Неизвестная ошибка: $e')),
-      );
-      setState(() => _isLoading = false);
+      setState(() {
+        _errorMessage = 'Ошибка: $e';
+      });
     }
   }
 
-  // Вход по коду из SMS
-  Future<void> _loginWithPhoneCode(BuildContext context) async {
-    setState(() => _isLoading = true);
+  Future<void> _verifyCode(String smsCode) async {
+    if (_verificationId == null) {
+      setState(() {
+        _errorMessage = 'Идентификатор верификации отсутствует';
+      });
+      return;
+    }
+
     try {
       final credential = PhoneAuthProvider.credential(
         verificationId: _verificationId!,
-        smsCode: _codeController.text.trim(),
+        smsCode: smsCode,
       );
-      final userCredential =
-          await FirebaseAuth.instance.signInWithCredential(credential);
-      _navigateToPickupSelection(context, userCredential);
-    } on FirebaseAuthException catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Ошибка кода: ${e.message}')),
-      );
-    } finally {
-      setState(() => _isLoading = false);
+      await FirebaseAuth.instance.signInWithCredential(credential);
+      print(
+          "User logged in: ${FirebaseAuth.instance.currentUser?.phoneNumber}");
+      if (mounted) {
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(
+              builder: (context) => const PickupSelectionScreen()),
+        );
+      }
+    } catch (e) {
+      setState(() {
+        _errorMessage = 'Ошибка верификации кода: $e';
+      });
     }
   }
 
-  // Переход на экран выбора пункта выдачи после входа клиента
-  void _navigateToPickupSelection(
-      BuildContext context, UserCredential userCredential) {
-    Navigator.pushReplacement(
-      context,
-      MaterialPageRoute(
-        builder: (context) => PickupSelectionScreen(
-          user: userCredential.user!, // Передаем User
-        ),
-      ),
-    );
+  Future<void> _loginAsEmployee() async {
+    if (_formKey.currentState!.validate()) {
+      try {
+        await FirebaseAuth.instance.signInWithEmailAndPassword(
+          email: _emailController.text.trim(),
+          password: _passwordController.text.trim(),
+        );
+        if (mounted) {
+          Navigator.pushReplacement(
+            context,
+            MaterialPageRoute(builder: (context) => const EmployeeHomeScreen()),
+          );
+        }
+      } catch (e) {
+        setState(() {
+          _errorMessage = 'Ошибка входа: $e';
+        });
+      }
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.grey[100],
-      body: Center(
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.all(24.0),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
+      appBar: AppBar(
+        title: const Text('Вход'),
+        backgroundColor: Colors.deepPurple,
+      ),
+      body: Padding(
+        padding: const EdgeInsets.all(16.0),
+        child: Form(
+          key: _formKey,
+          child: ListView(
             children: [
-              Text(
-                'Вход в WB Пункт',
-                style: TextStyle(
-                  fontSize: 28,
-                  fontWeight: FontWeight.bold,
-                  color: Colors.deepPurple,
-                ),
+              SwitchListTile(
+                title: Text(
+                    _isCustomer ? 'Вход для клиента' : 'Вход для сотрудника'),
+                value: _isCustomer,
+                onChanged: (value) {
+                  setState(() {
+                    _isCustomer = value;
+                    _errorMessage = null;
+                    _isCodeSent = false;
+                    _emailController.clear();
+                    _passwordController.clear();
+                    _phoneController.clear();
+                    _smsCodeController.clear();
+                  });
+                },
               ),
-              const SizedBox(height: 40),
-              // Поле ввода Email/Phone (без кода страны)
-              TextField(
-                controller: _inputController,
-                decoration: InputDecoration(
-                  labelText: 'Email или телефон',
-                  hintText: 'например, test@wbpvz.com или 79991234567',
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  filled: true,
-                  fillColor: Colors.white,
-                  prefixIcon: Icon(Icons.person, color: Colors.deepPurple),
+              if (!_isCustomer) ...[
+                TextFormField(
+                  controller: _emailController,
+                  decoration: const InputDecoration(labelText: 'Email'),
+                  keyboardType: TextInputType.emailAddress,
+                  validator: (value) {
+                    if (value == null || value.isEmpty) {
+                      return 'Введите email';
+                    }
+                    if (!EmailValidator.validate(value)) {
+                      return 'Введите корректный email';
+                    }
+                    if (!value.endsWith('@wbpvz.com')) {
+                      return 'Email должен быть на домене @wbpvz.com';
+                    }
+                    return null;
+                  },
                 ),
-                keyboardType: TextInputType.phone, // Клавиатура для чисел
-                onChanged: _checkInput,
-              ),
-              const SizedBox(height: 20),
-              // Поле пароля для сотрудников
-              if (_showPasswordField)
-                TextField(
+                TextFormField(
                   controller: _passwordController,
-                  decoration: InputDecoration(
-                    labelText: 'Пароль',
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    filled: true,
-                    fillColor: Colors.white,
-                    prefixIcon: Icon(Icons.lock, color: Colors.deepPurple),
-                  ),
+                  decoration: const InputDecoration(labelText: 'Пароль'),
                   obscureText: true,
+                  validator: (value) {
+                    if (value == null || value.isEmpty) {
+                      return 'Введите пароль';
+                    }
+                    if (value.length < 6) {
+                      return 'Пароль должен содержать минимум 6 символов';
+                    }
+                    return null;
+                  },
                 ),
-              // Поле кода для клиентов
-              if (_showCodeField)
-                TextField(
-                  controller: _codeController,
-                  decoration: InputDecoration(
-                    labelText: 'Код из SMS',
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(12),
+                const SizedBox(height: 16),
+                ElevatedButton(
+                  onPressed: _loginAsEmployee,
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.deepPurple,
+                  ),
+                  child: const Text('Войти как сотрудник'),
+                ),
+              ] else ...[
+                if (!_isCodeSent) ...[
+                  TextFormField(
+                    controller: _phoneController,
+                    decoration:
+                        const InputDecoration(labelText: 'Номер телефона'),
+                    keyboardType: TextInputType.phone,
+                    validator: (value) {
+                      if (value == null || value.isEmpty) {
+                        return 'Введите номер телефона';
+                      }
+                      if (!RegExp(r'^\d{10}$').hasMatch(value)) {
+                        return 'Введите корректный номер телефона (10 цифр)';
+                      }
+                      return null;
+                    },
+                  ),
+                  const SizedBox(height: 16),
+                  ElevatedButton(
+                    onPressed: () {
+                      if (_formKey.currentState!.validate()) {
+                        _sendCodeToPhoneNumber();
+                      }
+                    },
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.deepPurple,
                     ),
-                    filled: true,
-                    fillColor: Colors.white,
-                    prefixIcon: Icon(Icons.sms, color: Colors.deepPurple),
+                    child: const Text('Отправить код'),
                   ),
-                  keyboardType: TextInputType.number,
-                ),
-              const SizedBox(height: 20),
-              // Кнопка действия
-              ElevatedButton(
-                onPressed: _isLoading
-                    ? null
-                    : () {
-                        if (_inputType == 'email' && _showPasswordField) {
-                          _loginWithEmail(context);
-                        } else if (_inputType == 'phone') {
-                          if (_verificationId == null) {
-                            _sendSMS(context);
-                          } else if (_showCodeField) {
-                            _loginWithPhoneCode(context);
-                          }
-                        }
-                      },
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.deepPurple,
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 40, vertical: 16),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12),
+                ] else ...[
+                  TextFormField(
+                    controller: _smsCodeController,
+                    decoration: const InputDecoration(labelText: 'Код из SMS'),
+                    keyboardType: TextInputType.number,
+                    validator: (value) {
+                      if (value == null || value.isEmpty) {
+                        return 'Введите код из SMS';
+                      }
+                      if (value.length != 6) {
+                        return 'Код должен содержать 6 цифр';
+                      }
+                      return null;
+                    },
                   ),
+                  const SizedBox(height: 16),
+                  ElevatedButton(
+                    onPressed: () {
+                      if (_formKey.currentState!.validate()) {
+                        _verifyCode(_smsCodeController.text.trim());
+                      }
+                    },
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.deepPurple,
+                    ),
+                    child: const Text('Подтвердить код'),
+                  ),
+                ],
+              ],
+              if (_errorMessage != null) ...[
+                const SizedBox(height: 16),
+                Text(
+                  _errorMessage!,
+                  style: const TextStyle(color: Colors.red),
                 ),
-                child: _isLoading
-                    ? const CircularProgressIndicator(color: Colors.white)
-                    : Text(
-                        _inputType == 'email'
-                            ? 'Войти'
-                            : (_verificationId == null
-                                ? 'Отправить код'
-                                : 'Подтвердить'),
-                        style:
-                            const TextStyle(fontSize: 18, color: Colors.white),
-                      ),
-              ),
+              ],
             ],
           ),
         ),
