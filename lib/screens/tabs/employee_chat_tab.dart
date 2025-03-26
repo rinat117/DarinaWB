@@ -2,16 +2,17 @@ import 'package:flutter/material.dart';
 import 'package:firebase_database/firebase_database.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 
-class ChatTab extends StatefulWidget {
+class EmployeeChatTab extends StatefulWidget {
   final String pickupPointId;
 
-  const ChatTab({Key? key, required this.pickupPointId}) : super(key: key);
+  const EmployeeChatTab({Key? key, required this.pickupPointId})
+      : super(key: key);
 
   @override
-  State<ChatTab> createState() => _ChatTabState();
+  State<EmployeeChatTab> createState() => _EmployeeChatTabState();
 }
 
-class _ChatTabState extends State<ChatTab> {
+class _EmployeeChatTabState extends State<EmployeeChatTab> {
   final TextEditingController _messageController = TextEditingController();
   List<Map<String, dynamic>> _messages = [];
   final databaseReference = FirebaseDatabase.instance.ref();
@@ -52,7 +53,7 @@ class _ChatTabState extends State<ChatTab> {
     if (user == null) return;
 
     final message = {
-      'sender': user.phoneNumber,
+      'sender': user.email,
       'message': _messageController.text,
       'timestamp': DateTime.now().millisecondsSinceEpoch,
     };
@@ -80,7 +81,7 @@ class _ChatTabState extends State<ChatTab> {
               itemBuilder: (context, index) {
                 final message = _messages[index];
                 final isMe = message['sender'] ==
-                    FirebaseAuth.instance.currentUser?.phoneNumber;
+                    FirebaseAuth.instance.currentUser?.email;
                 return ListTile(
                   title: Text(
                     message['sender'] ?? 'Аноним',

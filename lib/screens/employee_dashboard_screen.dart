@@ -1,24 +1,24 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'tabs/home_tab.dart';
-import 'tabs/chat_tab.dart';
-import 'tabs/profile_tab.dart';
+import 'tabs/employee_home_tab.dart';
+import 'tabs/employee_chat_tab.dart';
 
-class DashboardScreen extends StatefulWidget {
+class EmployeeDashboardScreen extends StatefulWidget {
   final String pickupPointId;
   final User user;
 
-  const DashboardScreen({
+  const EmployeeDashboardScreen({
     Key? key,
     required this.pickupPointId,
     required this.user,
   }) : super(key: key);
 
   @override
-  State<DashboardScreen> createState() => _DashboardScreenState();
+  State<EmployeeDashboardScreen> createState() =>
+      _EmployeeDashboardScreenState();
 }
 
-class _DashboardScreenState extends State<DashboardScreen> {
+class _EmployeeDashboardScreenState extends State<EmployeeDashboardScreen> {
   int _selectedIndex = 0;
 
   late final List<Widget> _tabs;
@@ -27,9 +27,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
   void initState() {
     super.initState();
     _tabs = [
-      HomeTab(pickupPointId: widget.pickupPointId),
-      ChatTab(pickupPointId: widget.pickupPointId),
-      ProfileTab(user: widget.user, pickupPointId: widget.pickupPointId),
+      const EmployeeHomeTab(),
+      EmployeeChatTab(pickupPointId: widget.pickupPointId),
     ];
   }
 
@@ -52,10 +51,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
           BottomNavigationBarItem(
             icon: Icon(Icons.chat),
             label: 'Чат',
-          ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.person),
-            label: 'Моё',
           ),
         ],
         currentIndex: _selectedIndex,
