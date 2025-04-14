@@ -28,8 +28,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
     super.initState();
     _tabs = [
       HomeTab(pickupPointId: widget.pickupPointId),
-      ChatTab(pickupPointId: widget.pickupPointId),
+      ChatTab(
+          pickupPointId: widget.pickupPointId,
+          user: widget.user), // <<<--- ПЕРЕДАЕМ USER
       ProfileTab(user: widget.user, pickupPointId: widget.pickupPointId),
+      // Добавь четвертую вкладку, если она нужна для клиента, например "Информация"
+      // const Center(child: Text('Информация')),
     ];
   }
 
@@ -42,8 +46,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: _tabs[_selectedIndex],
+      body: IndexedStack(
+        // Используем IndexedStack
+        index: _selectedIndex,
+        children: _tabs,
+      ),
       bottomNavigationBar: BottomNavigationBar(
+        type: BottomNavigationBarType.fixed, // Чтобы лейблы не пропадали
         items: const <BottomNavigationBarItem>[
           BottomNavigationBarItem(
             icon: Icon(Icons.home),
@@ -57,9 +66,15 @@ class _DashboardScreenState extends State<DashboardScreen> {
             icon: Icon(Icons.person),
             label: 'Моё',
           ),
+          // Если нужна 4я вкладка для клиента:
+          // BottomNavigationBarItem(
+          //   icon: Icon(Icons.info_outline),
+          //   label: 'Инфо',
+          // ),
         ],
         currentIndex: _selectedIndex,
         selectedItemColor: Colors.deepPurple,
+        unselectedItemColor: Colors.grey,
         onTap: _onItemTapped,
       ),
     );
