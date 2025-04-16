@@ -1,8 +1,10 @@
-import 'dart:async'; // Импорт для StreamSubscription
+import 'dart:async';
+import 'dart:convert'; // Для jsonEncode/jsonDecode
 import 'package:flutter/material.dart';
 import 'package:firebase_database/firebase_database.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:intl/intl.dart'; // Для форматирования времени
+import 'package:http/http.dart' as http; // Импорт http
+import 'package:intl/intl.dart';
 import '../../models/chat_message.dart'; // Убедись, что путь верный
 
 class ChatTab extends StatefulWidget {
@@ -23,27 +25,41 @@ class _ChatTabState extends State<ChatTab> {
   final TextEditingController _messageController = TextEditingController();
   final ScrollController _scrollController = ScrollController();
   List<ChatMessage> _messages = [];
-  bool _isLoading = true;
-  StreamSubscription? _messagesSubscription; // Подписка на сообщения
+  bool _isLoadingMessages = true; // Загрузка сообщений
+  bool _isLoadingStatus = true; // Загрузка статуса
+  bool _isBotProcessing = false; // Индикатор работы бота
+  String _currentChatStatus = 'bot'; // Текущий статус чата
+  StreamSubscription? _messagesSubscription;
+  StreamSubscription? _statusSubscription; // Слушатель статуса
 
-  DatabaseReference? _chatRef; // Ссылка на ветку чата (может быть null)
-  bool _isChatRefInitialized = false; // Флаг для проверки
+  DatabaseReference? _chatRef;
+  DatabaseReference? _statusRef;
+  bool _isChatRefInitialized = false;
+
+  // --- ВАЖНО: ЗАМЕНИ НА СВОЙ КЛЮЧ И URL! ---
+  // Вставь свой реальный ключ OpenRouter вместо "sk-or-v1-..."
+  final String _openRouterApiKey =
+      "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"; // <<<--- ТВОЙ API КЛЮЧ ЗДЕСЬ! (ПОМНИ О БЕЗОПАСНОСТИ!)
+  final String _yourSiteUrl =
+      "app://com.example.myapp"; // <<<--- Замени на URL/Идентификатор твоего приложения
+  final String _yourSiteName = "Darina WB Helper"; // <<<--- Замени на название
+  // ---
 
   @override
   void initState() {
     super.initState();
-    _initializeChatRefAndListen(); // Инициализация и запуск слушателя
+    _initializeChatRefAndListen();
   }
 
   @override
   void dispose() {
     _messageController.dispose();
     _scrollController.dispose();
-    _messagesSubscription?.cancel(); // Отменяем подписку при удалении виджета
+    _messagesSubscription?.cancel();
+    _statusSubscription?.cancel();
     super.dispose();
   }
 
-  // Инициализация ссылки на чат и запуск прослушивания
   void _initializeChatRefAndListen() {
     String? userPhone = widget.user.phoneNumber?.replaceAll('+', '');
     if (userPhone != null &&
@@ -52,35 +68,72 @@ class _ChatTabState extends State<ChatTab> {
       try {
         _chatRef = FirebaseDatabase.instance
             .ref('chats/${widget.pickupPointId}/$userPhone');
+        _statusRef = FirebaseDatabase.instance
+            .ref('users/customers/$userPhone/chat_status');
         _isChatRefInitialized = true;
-        _listenToMessages(); // Начинаем слушать сообщения
+        _listenToMessages();
+        _listenToChatStatus(); // Начинаем слушать статус
       } catch (e) {
         print("Error initializing chat reference: $e");
-        if (mounted) setState(() => _isLoading = false);
+        if (mounted)
+          setState(() {
+            _isLoadingMessages = false;
+            _isLoadingStatus = false;
+          });
       }
     } else {
       print(
           "Error: Cannot initialize chat. User phone or pickupPointId is invalid.");
-      if (mounted) setState(() => _isLoading = false);
+      if (mounted)
+        setState(() {
+          _isLoadingMessages = false;
+          _isLoadingStatus = false;
+        });
     }
   }
 
-  // Прослушивание сообщений
-  void _listenToMessages() {
-    if (!_isChatRefInitialized || _chatRef == null) return; // Двойная проверка
+  void _listenToChatStatus() {
+    if (!_isChatRefInitialized || _statusRef == null) return;
+    if (mounted) setState(() => _isLoadingStatus = true);
 
-    setState(() => _isLoading = true);
+    _statusSubscription = _statusRef!.onValue.listen((event) {
+      if (!mounted) return;
+      String status = 'bot'; // Статус по умолчанию
+      if (event.snapshot.exists &&
+          event.snapshot.value != null &&
+          event.snapshot.value is String) {
+        status = event.snapshot.value as String;
+      } else {
+        // Если статус не найден в базе, устанавливаем 'bot' по умолчанию
+        _statusRef?.set('bot');
+      }
+      setState(() {
+        _currentChatStatus = status;
+        _isLoadingStatus = false; // Статус загружен
+      });
+      print("Chat status updated: $_currentChatStatus");
+    }, onError: (error) {
+      print("Error listening to chat status: $error");
+      if (mounted)
+        setState(() {
+          _currentChatStatus = 'bot';
+          _isLoadingStatus = false;
+        }); // Статус по умолчанию при ошибке
+    });
+  }
+
+  void _listenToMessages() {
+    if (!_isChatRefInitialized || _chatRef == null) return;
+    if (mounted) setState(() => _isLoadingMessages = true);
+
     _messagesSubscription =
         _chatRef!.orderByChild('timestamp').onValue.listen((event) {
-      // Используем ! после проверки
       if (!mounted) return;
-
       final List<ChatMessage> loadedMessages = [];
       if (event.snapshot.exists && event.snapshot.value != null) {
         final messagesMap = event.snapshot.value as Map<dynamic, dynamic>;
         messagesMap.forEach((key, value) {
           if (value is Map) {
-            // Добавляем проверку типа перед созданием объекта
             try {
               loadedMessages.add(ChatMessage.fromJson(key, value));
             } catch (e) {
@@ -91,62 +144,197 @@ class _ChatTabState extends State<ChatTab> {
       }
       setState(() {
         _messages = loadedMessages;
-        _isLoading = false;
+        _isLoadingMessages = false; // Сообщения загружены
       });
-      _scrollToBottom(); // Прокрутка вниз после обновления
+      _scrollToBottom();
     }, onError: (error) {
       print("Error listening to messages: $error");
       if (mounted) {
-        setState(() => _isLoading = false);
+        setState(() => _isLoadingMessages = false);
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text("Ошибка загрузки чата: $error")),
-        );
+            SnackBar(content: Text("Ошибка загрузки чата: $error")));
       }
     });
   }
 
-  // Отправка сообщения
   Future<void> _sendMessage() async {
     if (!_isChatRefInitialized || _chatRef == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text("Ошибка чата. Не удалось отправить.")));
-      return;
+      /* ... ошибка ... */ return;
     }
-    if (_messageController.text.trim().isEmpty) return;
+    final userMessageText = _messageController.text.trim();
+    if (userMessageText.isEmpty) return;
 
     final user = widget.user;
-    String? senderId =
-        user.phoneNumber; // Клиент отправляет со своим номером телефона
-
+    String? senderId = user.phoneNumber;
     if (senderId == null || senderId.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text(
-              "Не удалось отправить сообщение: номер телефона не найден.")));
-      return;
+      /* ... ошибка ... */ return;
     }
+    // Получаем чистый номер телефона для чтения статуса
+    String userPhoneClean = senderId.replaceAll('+', '');
 
-    final message = {
-      'sender':
-          senderId, // Можно оставить '+' или убрать - главное консистентность
-      'sender_type': 'customer', // Тип отправителя
-      'message': _messageController.text.trim(),
+    final userMessagePayload = {
+      'sender': senderId,
+      'sender_type': 'customer',
+      'message': userMessageText,
       'timestamp': DateTime.now().millisecondsSinceEpoch,
     };
 
+    _messageController.clear(); // Очищаем поле ввода сразу
+
     try {
-      await _chatRef!.push().set(message); // Используем ! после проверки
-      _messageController.clear();
-      _scrollToBottom(); // Прокрутка после отправки
+      // 1. Сохраняем сообщение пользователя
+      DatabaseReference newMessageRef =
+          _chatRef!.push(); // Получаем ссылку на новое сообщение
+      await newMessageRef.set(userMessagePayload);
+      _scrollToBottom(); // Прокручиваем сразу после добавления нашего сообщения
+
+      // 2. Проверяем статус чата (используем актуальное значение из state)
+      print("Checking status before bot call: $_currentChatStatus");
+      if (_currentChatStatus == 'bot') {
+        // 3. Вызываем псевдо-бота
+        setState(() => _isBotProcessing = true);
+        await _getAndSaveBotResponse(userMessageText);
+        // Убираем индикатор бота после его ответа (или ошибки)
+        if (mounted) setState(() => _isBotProcessing = false);
+      }
     } catch (e) {
-      print("Error sending message: $e");
+      print("Error sending message or triggering bot: $e");
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text("Ошибка отправки сообщения: $e")));
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text("Ошибка отправки: $e")));
+        setState(
+            () => _isBotProcessing = false); // Убираем индикатор при ошибке
       }
     }
   }
 
-  // Прокрутка к последнему сообщению
+  Future<void> _getAndSaveBotResponse(String userMessage) async {
+    // Проверка ключа (лучше вынести в переменные окружения, но для демо...)
+    if (_openRouterApiKey.startsWith("sk-or-v1-...") ||
+        _openRouterApiKey.isEmpty) {
+      print("OpenRouter API Key is missing or invalid!");
+      await _saveBotMessage(
+          "Извините, я сейчас не доступен (API Key не настроен)."); // Используем await
+      return;
+    }
+
+    final String url = "https://openrouter.ai/api/v1/chat/completions";
+    final String systemPrompt =
+        "Ты — чат-бот пункта выдачи заказов Wildberries. Отвечай ТОЛЬКО на вопросы, связанные с заказами, доставкой, работой пункта выдачи, возвратами и компанией Wildberries. Будь вежливым и кратким. На любые другие темы отвечай: 'Простите, я могу помочь только с вопросами по Wildberries и работе пункта выдачи.'. Не упоминай, что ты ИИ или чат-бот.";
+
+    print("Sending to OpenRouter: $userMessage");
+
+    try {
+      final response = await http
+          .post(
+            Uri.parse(url),
+            headers: {
+              'Authorization': 'Bearer $_openRouterApiKey',
+              'Content-Type': 'application/json',
+              'HTTP-Referer': _yourSiteUrl,
+              'X-Title': _yourSiteName,
+            },
+            body: jsonEncode({
+              "model":
+                  "deepseek/deepseek-chat-v3-0324:free", // Используем бесплатную модель
+              "messages": [
+                {"role": "system", "content": systemPrompt},
+                {"role": "user", "content": userMessage}
+              ]
+            }),
+          )
+          .timeout(const Duration(seconds: 30)); // Таймаут 30 секунд
+
+      if (!mounted) return;
+
+      if (response.statusCode == 200) {
+        final responseBody =
+            jsonDecode(utf8.decode(response.bodyBytes)); // Декодируем UTF-8
+        if (responseBody['choices'] != null &&
+            responseBody['choices'].isNotEmpty) {
+          final botMessage =
+              responseBody['choices'][0]['message']['content']?.trim();
+          if (botMessage != null && botMessage.isNotEmpty) {
+            print("Bot response received: $botMessage");
+            await _saveBotMessage(botMessage); // Ждем сохранения
+          } else {
+            print("Bot response was empty.");
+            await _saveBotMessage("..."); // Ответ-заглушка
+          }
+        } else {
+          print("Invalid response structure from OpenRouter: ${response.body}");
+          await _saveBotMessage("Не удалось получить ответ.");
+        }
+      } else {
+        print(
+            "Error calling OpenRouter API: ${response.statusCode} ${response.body}");
+        await _saveBotMessage(
+            "Извините, помощник временно недоступен (${response.statusCode}).");
+      }
+    } catch (e) {
+      print("Exception calling OpenRouter API: $e");
+      if (mounted) {
+        await _saveBotMessage("Извините, не удалось связаться с помощником.");
+      }
+    }
+  }
+
+  Future<void> _saveBotMessage(String messageText) async {
+    if (!_isChatRefInitialized || _chatRef == null) return;
+
+    final botMessagePayload = {
+      'sender': 'bot',
+      'sender_type': 'bot',
+      'message': messageText,
+      'timestamp': DateTime.now().millisecondsSinceEpoch,
+    };
+
+    try {
+      await _chatRef!.push().set(botMessagePayload);
+      _scrollToBottom();
+    } catch (e) {
+      print("Error saving bot message: $e");
+    }
+  }
+
+  // --- Функция для запроса помощи сотрудника ---
+  Future<void> _requestEmployeeHelp() async {
+    if (!_isChatRefInitialized || _statusRef == null) return;
+
+    final userPhone = widget.user.phoneNumber?.replaceAll('+', '') ?? '';
+    // <<<--- ИСПРАВЛЕНИЕ ЗДЕСЬ ---
+    // Вместо несуществующей _username, берем номер телефона из widget.user
+    final customerDisplay = widget.user.phoneNumber ??
+        'Клиент'; // Берем полный номер или просто "Клиент"
+    // <<<--- КОНЕЦ ИСПРАВЛЕНИЯ ---
+
+    final systemMessage = {
+      'sender': 'system',
+      'sender_type': 'system',
+      // Теперь используем customerDisplay, который точно определен
+      'message': '$customerDisplay запросил помощь сотрудника.',
+      'timestamp': DateTime.now().millisecondsSinceEpoch,
+    };
+
+    // Остальная логика функции остается без изменений
+    try {
+      await _statusRef!.set('waiting');
+      await _chatRef!.push().set(systemMessage);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+              content: Text('Запрос отправлен. Сотрудник скоро подключится.')),
+        );
+      }
+    } catch (e) {
+      print("Error requesting employee help: $e");
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text("Не удалось запросить помощь: $e")));
+      }
+    }
+  }
+
   void _scrollToBottom() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (_scrollController.hasClients) {
@@ -161,7 +349,9 @@ class _ChatTabState extends State<ChatTab> {
 
   @override
   Widget build(BuildContext context) {
-    // Показываем ошибку, если чат не инициализирован
+    bool stillLoading =
+        _isLoadingMessages || _isLoadingStatus; // Общий флаг загрузки
+
     if (!_isChatRefInitialized) {
       return Scaffold(
         appBar: AppBar(
@@ -182,8 +372,61 @@ class _ChatTabState extends State<ChatTab> {
       ),
       body: Column(
         children: [
+          // --- Индикатор статуса чата и кнопка вызова сотрудника ---
+          // Показываем только если статус уже загружен
+          if (!_isLoadingStatus) ...[
+            if (_currentChatStatus != 'bot')
+              Container(
+                padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                color: _currentChatStatus == 'waiting'
+                    ? Colors.orange[100]
+                    : Colors.green[100],
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(
+                      _currentChatStatus == 'waiting'
+                          ? Icons.support_agent_outlined
+                          : Icons.check_circle_outline,
+                      size: 18,
+                      color: _currentChatStatus == 'waiting'
+                          ? Colors.orange[800]
+                          : Colors.green[800],
+                    ),
+                    SizedBox(width: 8),
+                    Text(
+                      _currentChatStatus == 'waiting'
+                          ? 'Ожидание сотрудника...'
+                          : 'Вам отвечает сотрудник',
+                      style: TextStyle(
+                        fontWeight: FontWeight.w500,
+                        color: _currentChatStatus == 'waiting'
+                            ? Colors.orange[800]
+                            : Colors.green[800],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            if (_currentChatStatus == 'bot')
+              Padding(
+                padding: const EdgeInsets.symmetric(
+                    vertical: 0.0), // Убрали верт отступ
+                child: TextButton.icon(
+                  style: TextButton.styleFrom(
+                    visualDensity: VisualDensity.compact, // Компактнее кнопка
+                  ),
+                  icon: Icon(Icons.support_agent, size: 20),
+                  label: Text('Связаться с сотрудником'),
+                  onPressed: _requestEmployeeHelp,
+                ),
+              ),
+            Divider(height: 1), // Разделитель
+          ],
+          // --- Конец индикатора/кнопки ---
+
           Expanded(
-            child: _isLoading
+            child: stillLoading // Используем общий флаг
                 ? Center(child: CircularProgressIndicator())
                 : _messages.isEmpty
                     ? Center(child: Text("Нет сообщений. Начните диалог!"))
@@ -193,12 +436,29 @@ class _ChatTabState extends State<ChatTab> {
                         itemCount: _messages.length,
                         itemBuilder: (context, index) {
                           final message = _messages[index];
-                          // Клиентские сообщения (sender_type == 'customer') справа
                           final isMe = message.senderType == 'customer';
                           return _buildMessageBubble(message, isMe);
                         },
                       ),
           ),
+          // --- Индикатор "Бот думает..." ---
+          if (_isBotProcessing)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 8.0),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  SizedBox(
+                      height: 15,
+                      width: 15,
+                      child: CircularProgressIndicator(strokeWidth: 2)),
+                  SizedBox(width: 10),
+                  Text("Бот печатает...", style: TextStyle(color: Colors.grey)),
+                ],
+              ),
+            ),
+          // --- Конец индикатора ---
+
           // Поле ввода
           Container(
             decoration:
@@ -211,8 +471,7 @@ class _ChatTabState extends State<ChatTab> {
             ]),
             padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 8.0)
                 .copyWith(
-                    bottom: MediaQuery.of(context).padding.bottom / 2 +
-                        8), // Учет нижнего отступа системы
+                    bottom: MediaQuery.of(context).padding.bottom / 2 + 8),
             child: Row(
               children: [
                 Expanded(
@@ -230,14 +489,16 @@ class _ChatTabState extends State<ChatTab> {
                           EdgeInsets.symmetric(horizontal: 16, vertical: 10),
                     ),
                     textCapitalization: TextCapitalization.sentences,
-                    minLines: 1,
-                    maxLines: 5,
+                    minLines: 1, maxLines: 5,
+                    enabled:
+                        !_isBotProcessing, // Блокируем ввод, пока бот думает
                   ),
                 ),
                 SizedBox(width: 8),
                 IconButton(
                   icon: const Icon(Icons.send, color: Colors.deepPurple),
-                  onPressed: _sendMessage,
+                  // Блокируем отправку, пока бот думает
+                  onPressed: _isBotProcessing ? null : _sendMessage,
                 ),
               ],
             ),
@@ -247,13 +508,45 @@ class _ChatTabState extends State<ChatTab> {
     );
   }
 
-  // Виджет для отображения "пузыря" сообщения
   Widget _buildMessageBubble(ChatMessage message, bool isMe) {
     final alignment = isMe ? CrossAxisAlignment.end : CrossAxisAlignment.start;
     final bubbleAlignment =
         isMe ? MainAxisAlignment.end : MainAxisAlignment.start;
-    final color = isMe ? Colors.deepPurple[400] : Colors.grey[300];
-    final textColor = isMe ? Colors.white : Colors.black87;
+    Color bubbleColor;
+    Color textColor;
+    // Определяем цвета в зависимости от типа отправителя
+    switch (message.senderType) {
+      case 'customer':
+        bubbleColor = Colors.deepPurple[400]!;
+        textColor = Colors.white;
+        break;
+      case 'employee':
+        bubbleColor = Colors.green[300]!;
+        textColor = Colors.black87;
+        break;
+      case 'bot':
+        bubbleColor = Colors.blueGrey[100]!;
+        textColor = Colors.black87;
+        break;
+      case 'system':
+        // Системные сообщения отображаем по центру
+        return Container(
+          padding: EdgeInsets.symmetric(vertical: 8.0, horizontal: 16.0),
+          alignment: Alignment.center,
+          child: Text(
+            message.message,
+            textAlign: TextAlign.center,
+            style: TextStyle(
+                color: Colors.grey[600],
+                fontStyle: FontStyle.italic,
+                fontSize: 12),
+          ),
+        );
+      default: // Неизвестный тип
+        bubbleColor = Colors.grey[300]!;
+        textColor = Colors.black87;
+    }
+
     final borderRadius = BorderRadius.only(
       topLeft: Radius.circular(16),
       topRight: Radius.circular(16),
@@ -262,35 +555,32 @@ class _ChatTabState extends State<ChatTab> {
     );
 
     return Container(
-      margin: const EdgeInsets.symmetric(
-          vertical: 4.0), // Убрали горизонтальный отступ для выравнивания
+      margin: const EdgeInsets.symmetric(vertical: 4.0),
       child: Row(
-        // Используем Row для выравнивания
         mainAxisAlignment: bubbleAlignment,
-        crossAxisAlignment: CrossAxisAlignment.end, // Выравниваем время по низу
+        crossAxisAlignment: CrossAxisAlignment.end,
         children: [
+          // Сообщение
           Flexible(
-            // Чтобы контейнер не занимал всю ширину
             child: Container(
               padding:
                   const EdgeInsets.symmetric(horizontal: 14.0, vertical: 10.0),
               decoration: BoxDecoration(
-                color: color,
+                color: bubbleColor,
                 borderRadius: borderRadius,
               ),
               constraints: BoxConstraints(
-                  maxWidth: MediaQuery.of(context).size.width *
-                      0.75), // Ограничение ширины
+                  maxWidth: MediaQuery.of(context).size.width * 0.75),
               child: Text(
                 message.message,
                 style: TextStyle(color: textColor, fontSize: 15),
               ),
             ),
           ),
-          SizedBox(width: 6), // Отступ между сообщением и временем
+          SizedBox(width: 6),
+          // Время
           Padding(
-            padding: const EdgeInsets.only(
-                bottom: 2.0), // Небольшой отступ времени снизу
+            padding: const EdgeInsets.only(bottom: 2.0),
             child: Text(
               DateFormat('HH:mm').format(
                   DateTime.fromMillisecondsSinceEpoch(message.timestamp)),

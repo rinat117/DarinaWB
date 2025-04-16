@@ -1,10 +1,10 @@
 import 'package:flutter/material.dart';
-import 'package:firebase_auth/firebase_auth.dart'; // Импортируем, если понадобится передавать User
-// Импорты для вкладок
-import 'tabs/employee_home_tab.dart'; // Вкладка "Сегодня"
-import 'tabs/employee_chat_tab.dart'; // Вкладка "Чат" (пока может быть заглушкой)
-import 'tabs/employee_settings_tab.dart'; // Вкладка "Настройки"
-// import 'tabs/employee_orders_tab.dart'; // Закомментировано, пока не создана
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:firebase_database/firebase_database.dart'; // <<<--- Добавить импорт
+import 'tabs/employee_home_tab.dart';
+import 'tabs/employee_chat_tab.dart';
+import 'tabs/employee_settings_tab.dart';
+// import 'tabs/employee_orders_tab.dart';
 
 class EmployeeHomeScreen extends StatefulWidget {
   const EmployeeHomeScreen({Key? key}) : super(key: key);
@@ -14,75 +14,138 @@ class EmployeeHomeScreen extends StatefulWidget {
 }
 
 class _EmployeeHomeScreenState extends State<EmployeeHomeScreen> {
-  int _selectedIndex = 0; // Индекс выбранной вкладки
+  int _selectedIndex = 0;
+  String? _pickupPointId; // <<<--- Добавляем состояние для ID ПВЗ
+  bool _isLoadingId = true; // <<<--- Флаг загрузки ID
 
-  // Список виджетов для каждой вкладки BottomNavigationBar
-  // Важно: порядок должен соответствовать порядку иконок в BottomNavigationBar
-  static final List<Widget> _widgetOptions = <Widget>[
-    const EmployeeHomeTab(), // 0: Вкладка "Сегодня"
-    const Center(
-        child:
-            Text('Заказы (В разработке)')), // 1: Заглушка для вкладки "Заказы"
-    // TODO: Заменить заглушку на EmployeeChatTab, когда будет готова логика получения pickupPointId для нее
-    // EmployeeChatTab(pickupPointId: 'ID_ПУНКТА'), // Пример
-    const Center(
-        child: Text('Чат (В разработке)')), // 2: Заглушка для вкладки "Чат"
-    const EmployeeSettingsTab(), // 3: Вкладка "Настройки"
-  ];
+  late List<Widget> _widgetOptions; // Оставляем late
 
-  // Обработчик нажатия на элемент BottomNavigationBar
+  @override
+  void initState() {
+    super.initState();
+    _loadEmployeePickupPointId(); // <<<--- Загружаем ID при инициализации
+  }
+
+  Future<void> _loadEmployeePickupPointId() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null || user.email == null) {
+      print(
+          "EmployeeHomeScreen Error: Cannot load pickupPointId, user not logged in.");
+      if (mounted) setState(() => _isLoadingId = false);
+      // Возможно, здесь нужен выход или показ ошибки
+      return;
+    }
+
+    final dbRef = FirebaseDatabase.instance.ref();
+    final safeEmailKey = user.email!.replaceAll('.', '_').replaceAll('@', '_');
+    print("EmployeeHomeScreen: Loading pickupPointId for key: $safeEmailKey");
+
+    try {
+      final snapshot = await dbRef
+          .child('users/employees/$safeEmailKey/pickup_point_id')
+          .get();
+      if (mounted) {
+        if (snapshot.exists && snapshot.value != null) {
+          setState(() {
+            _pickupPointId = snapshot.value as String?;
+            _isLoadingId = false;
+            _initializeTabs(); // <<<--- Инициализируем вкладки ПОСЛЕ загрузки ID
+          });
+          print("EmployeeHomeScreen: Loaded pickupPointId: $_pickupPointId");
+        } else {
+          print(
+              "EmployeeHomeScreen Error: pickup_point_id not found for employee $safeEmailKey");
+          setState(() => _isLoadingId = false);
+          // Обработка случая, когда ID не найден
+        }
+      }
+    } catch (e) {
+      print("EmployeeHomeScreen Error loading pickupPointId: $e");
+      if (mounted) setState(() => _isLoadingId = false);
+    }
+  }
+
+  // Инициализация списка вкладок (теперь зависит от _pickupPointId)
+  void _initializeTabs() {
+    _widgetOptions = <Widget>[
+      const EmployeeHomeTab(), // 0: Вкладка "Сегодня"
+      const Center(child: Text('Заказы (В разработке)')), // 1: Заглушка Заказы
+      // Передаем ID во вкладку чата, если он загружен
+      _pickupPointId != null && _pickupPointId!.isNotEmpty
+          ? EmployeeChatTab(pickupPointId: _pickupPointId!)
+          : const Center(
+              child: Text('Ошибка загрузки чата (нет ID ПВЗ)')), // 2: Чат
+      const EmployeeSettingsTab(), // 3: Вкладка "Настройки"
+    ];
+  }
+
   void _onItemTapped(int index) {
+    // Не позволяем переключаться, если ID еще не загружен (для вкладок, которым он нужен)
+    if (_isLoadingId && (index == 2)) {
+      // Проверяем для чата (индекс 2)
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text("Загрузка данных...")));
+      return;
+    }
     setState(() {
-      _selectedIndex = index; // Обновляем выбранный индекс
+      _selectedIndex = index;
     });
   }
 
   @override
   Widget build(BuildContext context) {
+    // Показываем загрузку, пока ID ПВЗ не загружен
+    if (_isLoadingId) {
+      return const Scaffold(
+        body: Center(child: CircularProgressIndicator()),
+      );
+    }
+    // Показываем ошибку, если ID не загрузился
+    if (_pickupPointId == null || _pickupPointId!.isEmpty) {
+      return Scaffold(
+        appBar: AppBar(title: Text("Ошибка")),
+        body: Center(
+            child: Text(
+                "Не удалось загрузить данные сотрудника.\nПожалуйста, попробуйте перезайти.")),
+      );
+    }
+
     return Scaffold(
-      // AppBar убран отсюда, так как каждая вкладка теперь имеет свой AppBar
       body: IndexedStack(
-        // IndexedStack сохраняет состояние вкладок при переключении
         index: _selectedIndex,
-        children: _widgetOptions, // Отображаем виджет выбранной вкладки
+        children: _widgetOptions, // Используем инициализированный список
       ),
-      // Нижний навигационный бар
       bottomNavigationBar: BottomNavigationBar(
-        type: BottomNavigationBarType.fixed, // Отображать названия всех вкладок
+        type: BottomNavigationBarType.fixed,
         items: const <BottomNavigationBarItem>[
-          // Элемент для вкладки "Сегодня"
           BottomNavigationBarItem(
-            icon: Icon(Icons.today_outlined), // Иконка неактивной вкладки
-            activeIcon: Icon(Icons.today), // Иконка активной вкладки
-            label: 'Сегодня', // Название вкладки
+            icon: Icon(Icons.today_outlined),
+            activeIcon: Icon(Icons.today),
+            label: 'Сегодня',
           ),
-          // Элемент для вкладки "Заказы"
           BottomNavigationBarItem(
             icon: Icon(Icons.list_alt_outlined),
             activeIcon: Icon(Icons.list_alt),
             label: 'Заказы',
           ),
-          // Элемент для вкладки "Чат"
           BottomNavigationBarItem(
             icon: Icon(Icons.chat_bubble_outline),
             activeIcon: Icon(Icons.chat_bubble),
             label: 'Чат',
           ),
-          // Элемент для вкладки "Настройки"
           BottomNavigationBarItem(
             icon: Icon(Icons.settings_outlined),
             activeIcon: Icon(Icons.settings),
             label: 'Настройки',
           ),
         ],
-        currentIndex: _selectedIndex, // Индекс текущей активной вкладки
-        selectedItemColor:
-            Colors.deepPurple, // Цвет иконки и текста активной вкладки
-        unselectedItemColor: Colors.grey[600], // Цвет неактивных элементов
-        onTap: _onItemTapped, // Функция, вызываемая при нажатии на вкладку
-        showUnselectedLabels: true, // Показывать названия неактивных вкладок
-        backgroundColor: Colors.white, // Цвет фона бара
-        elevation: 8.0, // Тень под баром
+        currentIndex: _selectedIndex,
+        selectedItemColor: Colors.deepPurple,
+        unselectedItemColor: Colors.grey[600],
+        onTap: _onItemTapped,
+        showUnselectedLabels: true,
+        backgroundColor: Colors.white,
+        elevation: 8.0,
       ),
     );
   }

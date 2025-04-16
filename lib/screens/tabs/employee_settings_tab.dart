@@ -1,8 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_database/firebase_database.dart';
-import '../../models/employee.dart'; // Модель сотрудника
-import '../../models/pickup_point_details.dart'; // Наша новая модель
+import '../../models/employee.dart'; // Убедись, что путь верный
+import '../../models/pickup_point_details.dart'; // Убедись, что путь верный
+import '../login_screen.dart'; // <<<--- ДОБАВЛЕН НУЖНЫЙ ИМПОРТ
 
 class EmployeeSettingsTab extends StatefulWidget {
   const EmployeeSettingsTab({Key? key}) : super(key: key);
@@ -51,6 +52,9 @@ class _EmployeeSettingsTabState extends State<EmployeeSettingsTab> {
     await _loadEmployeeData(); // Загружаем сотрудника и его ID ПВЗ
     if (_pickupPointId.isNotEmpty) {
       await _loadPickupPointData(_pickupPointId); // Грузим данные ПВЗ
+    } else {
+      print("Could not load pickup point data because pickupPointId is empty.");
+      // Можно показать сообщение об ошибке пользователю
     }
 
     if (mounted) setState(() => _isLoading = false);
@@ -59,11 +63,12 @@ class _EmployeeSettingsTabState extends State<EmployeeSettingsTab> {
   Future<void> _loadEmployeeData() async {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null || user.email == null) {
-      print("Error: Employee not logged in or email is null");
+      print("SettingsTab Error: Employee not logged in or email is null");
       return;
     }
     final dbRef = FirebaseDatabase.instance.ref();
     try {
+      // Используем ключ, безопасный для Firebase (адаптируй!)
       final safeEmailKey =
           user.email!.replaceAll('.', '_').replaceAll('@', '_');
       final snapshot = await dbRef.child('users/employees/$safeEmailKey').get();
@@ -72,12 +77,14 @@ class _EmployeeSettingsTabState extends State<EmployeeSettingsTab> {
         final employeeData = snapshot.value as Map<dynamic, dynamic>;
         _employee = Employee.fromJson(snapshot.key!, employeeData);
         _pickupPointId = _employee!.pickupPointId; // Сохраняем ID ПВЗ
-        print("Employee loaded, PickupPoint ID: $_pickupPointId");
+        print("SettingsTab Employee loaded, PickupPoint ID: $_pickupPointId");
       } else {
-        print("Employee data not found for email: ${user.email}");
+        print("SettingsTab Employee data not found for email: ${user.email}");
+        _pickupPointId = ''; // Сбрасываем ID, если сотрудника не нашли
       }
     } catch (e) {
-      print("Error loading employee data: $e");
+      print("SettingsTab Error loading employee data: $e");
+      _pickupPointId = ''; // Сбрасываем ID при ошибке
     }
   }
 
@@ -99,10 +106,12 @@ class _EmployeeSettingsTabState extends State<EmployeeSettingsTab> {
         _currentServices =
             List<String>.from(_pickupPointDetails!.services); // Копируем список
       } else {
-        print("Pickup point data not found for ID: $pickupPointId");
+        print("SettingsTab Pickup point data not found for ID: $pickupPointId");
+        _pickupPointDetails = null; // Сбрасываем детали, если не найдены
       }
     } catch (e) {
-      print("Error loading pickup point data: $e");
+      print("SettingsTab Error loading pickup point data: $e");
+      _pickupPointDetails = null; // Сбрасываем детали при ошибке
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(content: Text("Ошибка загрузки данных ПВЗ: $e")));
@@ -132,8 +141,6 @@ class _EmployeeSettingsTabState extends State<EmployeeSettingsTab> {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Данные пункта выдачи сохранены!')),
         );
-        // Можно перезагрузить данные для уверенности, но update должен быть виден
-        // await _loadPickupPointData(_pickupPointId);
       }
     } catch (e) {
       print("Error saving pickup point data: $e");
@@ -157,6 +164,7 @@ class _EmployeeSettingsTabState extends State<EmployeeSettingsTab> {
         _currentServices.add(newService);
       });
       _newServiceController.clear();
+      FocusScope.of(context).unfocus(); // Скрыть клавиатуру
     }
   }
 
@@ -169,10 +177,29 @@ class _EmployeeSettingsTabState extends State<EmployeeSettingsTab> {
 
   // --- Выход ---
   Future<void> _signOut() async {
-    await FirebaseAuth.instance.signOut();
-    // TODO: Вернуть на LoginScreen
-    // Navigator.of(context).pushAndRemoveUntil(...)
-    print("Employee signed out");
+    setState(() => _isLoading = true); // Показываем индикатор на время выхода
+    try {
+      await FirebaseAuth.instance.signOut();
+      print("Employee signed out");
+      // Возвращаемся на экран входа и удаляем все экраны позади
+      if (mounted) {
+        Navigator.of(context).pushAndRemoveUntil(
+          MaterialPageRoute(
+              builder: (context) =>
+                  const LoginScreen()), // <<<--- ТЕПЕРЬ LoginScreen НАЙДЕН
+          (Route<dynamic> route) => false, // Удаляем все предыдущие маршруты
+        );
+      }
+    } catch (e) {
+      print("Error signing out: $e");
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text("Ошибка выхода: $e")),
+        );
+        setState(() => _isLoading = false); // Убираем индикатор при ошибке
+      }
+    }
+    // Не нужно делать setState(_isLoading = false) здесь, так как мы уходим с экрана
   }
 
   @override
@@ -181,94 +208,150 @@ class _EmployeeSettingsTabState extends State<EmployeeSettingsTab> {
       appBar: AppBar(
         title: const Text('Настройки ПВЗ'),
         backgroundColor: Colors.deepPurple,
-        actions: [
-          IconButton(
-            icon: Icon(Icons.logout),
-            tooltip: 'Выйти',
-            onPressed: _signOut, // Используем функцию выхода
-          )
-        ],
+        // Кнопку выхода можно оставить и здесь, ИЛИ ТОЛЬКО ВНИЗУ
+        // actions: [
+        //   IconButton(
+        //      icon: Icon(Icons.logout),
+        //      tooltip: 'Выйти',
+        //      onPressed: _signOut,
+        //   )
+        // ],
       ),
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())
           : _pickupPointDetails == null
               ? Center(
-                  child: Text('Не удалось загрузить данные пункта выдачи.'))
-              : ListView(
-                  // Используем ListView для скролла
-                  padding: const EdgeInsets.all(16.0),
-                  children: [
-                    _buildTextField(_nameController, 'Название пункта выдачи'),
-                    _buildTextField(_addressController, 'Адрес'),
-                    _buildTextField(
-                        _phoneFormattedController, 'Телефон (форматированный)'),
-                    _buildTextField(
-                        _workingHoursController, 'Часы работы (текст)'),
-                    _buildTextField(_descriptionController, 'Описание',
-                        maxLines: 3),
+                  child: Padding(
+                  padding: const EdgeInsets.all(20.0),
+                  child: Text(
+                    'Не удалось загрузить данные пункта выдачи. Проверьте ваше подключение или попробуйте войти снова.',
+                    textAlign: TextAlign.center,
+                  ),
+                ))
+              : GestureDetector(
+                  // Добавляем GestureDetector для скрытия клавиатуры по тапу вне полей
+                  onTap: () => FocusScope.of(context).unfocus(),
+                  child: ListView(
+                    padding: const EdgeInsets.all(16.0),
+                    children: [
+                      // --- Основная информация ---
+                      Text('Основная информация',
+                          style: Theme.of(context).textTheme.titleLarge),
+                      _buildTextField(
+                          _nameController, 'Название пункта выдачи'),
+                      _buildTextField(_addressController, 'Адрес'),
+                      _buildTextField(
+                          _phoneFormattedController, 'Телефон (для клиента)'),
+                      _buildTextField(
+                          _workingHoursController, 'Часы работы (текст)'),
+                      _buildTextField(
+                          _descriptionController, 'Краткое описание',
+                          maxLines: 3),
+                      const Divider(height: 30),
 
-                    const SizedBox(height: 20),
-                    Text('Услуги',
-                        style: Theme.of(context).textTheme.titleLarge),
-                    const SizedBox(height: 8),
-                    // Поле для добавления услуги
-                    Row(
-                      children: [
-                        Expanded(
-                          child: TextField(
-                            controller: _newServiceController,
-                            decoration: InputDecoration(
-                              hintText: 'Добавить услугу...',
-                              border: OutlineInputBorder(),
-                              contentPadding: EdgeInsets.symmetric(
-                                  horizontal: 12, vertical: 10),
+                      // --- Услуги ---
+                      Text('Услуги',
+                          style: Theme.of(context).textTheme.titleLarge),
+                      const SizedBox(height: 8),
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Expanded(
+                            child: TextField(
+                              controller: _newServiceController,
+                              decoration: InputDecoration(
+                                hintText: 'Добавить услугу...',
+                                border: OutlineInputBorder(),
+                                contentPadding: EdgeInsets.symmetric(
+                                    horizontal: 12, vertical: 10),
+                              ),
+                              onSubmitted: (_) => _addService(),
                             ),
-                            onSubmitted: (_) =>
-                                _addService(), // Добавляем по Enter
                           ),
-                        ),
-                        IconButton(
-                          icon: Icon(Icons.add_circle_outline,
-                              color: Colors.deepPurple),
-                          onPressed: _addService,
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 8),
-                    // Отображение текущих услуг с кнопками удаления
-                    Wrap(
-                      spacing: 8.0, // Горизонтальный отступ
-                      runSpacing: 4.0, // Вертикальный отступ
-                      children: _currentServices
-                          .map((service) => Chip(
-                                label: Text(service),
-                                deleteIcon: Icon(Icons.cancel, size: 18),
-                                onDeleted: () => _removeService(service),
-                              ))
-                          .toList(),
-                    ),
+                          SizedBox(width: 8),
+                          Padding(
+                            padding: const EdgeInsets.only(
+                                top: 4.0), // Выровнять кнопку по вертикали
+                            child: IconButton(
+                              icon: Icon(Icons.add_circle,
+                                  color: Colors.deepPurple, size: 30),
+                              onPressed: _addService,
+                              tooltip: 'Добавить услугу',
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 8),
+                      _currentServices.isEmpty
+                          ? Padding(
+                              padding:
+                                  const EdgeInsets.symmetric(vertical: 8.0),
+                              child: Text('Услуги пока не добавлены.',
+                                  style: TextStyle(color: Colors.grey)),
+                            )
+                          : Wrap(
+                              spacing: 8.0,
+                              runSpacing: 0.0, // Уменьшаем вертикальный отступ
+                              children: _currentServices
+                                  .map((service) => Chip(
+                                        label: Text(service),
+                                        deleteIcon:
+                                            Icon(Icons.cancel, size: 18),
+                                        onDeleted: () =>
+                                            _removeService(service),
+                                        padding: EdgeInsets.symmetric(
+                                            horizontal: 6,
+                                            vertical: 0), // Уменьшаем padding
+                                        labelPadding: EdgeInsets.only(
+                                            left: 8), // Отступ слева для текста
+                                      ))
+                                  .toList(),
+                            ),
+                      const Divider(height: 30),
 
-                    const SizedBox(height: 30),
-                    // Кнопка сохранения
-                    Center(
-                      child: ElevatedButton.icon(
-                        icon: Icon(Icons.save_alt),
-                        label: Text('Сохранить изменения'),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.green,
-                          padding: EdgeInsets.symmetric(
-                              horizontal: 30, vertical: 15),
+                      // --- Кнопка сохранения ---
+                      Center(
+                        child: ElevatedButton.icon(
+                          icon: _isSaving
+                              ? SizedBox(
+                                  width: 20,
+                                  height: 20,
+                                  child: CircularProgressIndicator(
+                                      strokeWidth: 2, color: Colors.white))
+                              : Icon(Icons.save_alt),
+                          label: Text(_isSaving
+                              ? 'Сохранение...'
+                              : 'Сохранить изменения'),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: _isSaving
+                                ? Colors.grey
+                                : Colors.green, // Цвет кнопки при сохранении
+                            padding: EdgeInsets.symmetric(
+                                horizontal: 30, vertical: 15),
+                          ),
+                          onPressed: _isSaving
+                              ? null
+                              : _saveChanges, // Блокируем кнопку во время сохранения
                         ),
-                        onPressed: _isSaving ? null : _saveChanges,
                       ),
-                    ),
-                    if (_isSaving) // Показываем индикатор во время сохранения
-                      Padding(
-                        padding: const EdgeInsets.only(top: 16.0),
-                        child: Center(child: CircularProgressIndicator()),
+                      const SizedBox(height: 40), // Отступ
+
+                      // --- Кнопка Выхода ---
+                      Center(
+                        child: OutlinedButton.icon(
+                          icon: Icon(Icons.logout, color: Colors.red),
+                          label: Text('Выйти из аккаунта',
+                              style: TextStyle(color: Colors.red)),
+                          style: OutlinedButton.styleFrom(
+                            side:
+                                BorderSide(color: Colors.red.withOpacity(0.5)),
+                          ),
+                          onPressed: _signOut,
+                        ),
                       ),
-                    const SizedBox(height: 40), // Отступ снизу
-                  ],
+                      const SizedBox(height: 20), // Нижний отступ
+                    ],
+                  ),
                 ),
     );
   }
@@ -283,6 +366,7 @@ class _EmployeeSettingsTabState extends State<EmployeeSettingsTab> {
         decoration: InputDecoration(
           labelText: label,
           border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+          alignLabelWithHint: true, // Для многострочных полей
         ),
         maxLines: maxLines,
       ),

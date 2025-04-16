@@ -32,6 +32,10 @@ class _EmployeeChatScreenState extends State<EmployeeChatScreen> {
   User? _currentUser; // Сотрудник
 
   DatabaseReference? _chatRef; // Ссылка на ветку чата
+  DatabaseReference? _statusRef; // <<<--- Ссылка на статус чата клиента
+  String _currentChatStatus =
+      'bot'; // <<<--- Текущий статус чата (для логики кнопки Завершить)
+  StreamSubscription? _statusSubscription; // <<<--- Слушатель статуса
   bool _isChatRefInitialized = false;
 
   @override
@@ -46,6 +50,7 @@ class _EmployeeChatScreenState extends State<EmployeeChatScreen> {
     _messageController.dispose();
     _scrollController.dispose();
     _messagesSubscription?.cancel();
+    _statusSubscription?.cancel(); // <<<--- Отменяем подписку на статус
     super.dispose();
   }
 
@@ -63,21 +68,44 @@ class _EmployeeChatScreenState extends State<EmployeeChatScreen> {
     try {
       _chatRef = FirebaseDatabase.instance
           .ref('chats/${widget.pickupPointId}/${widget.customerPhoneNumber}');
+      _statusRef = FirebaseDatabase.instance.ref(
+          'users/customers/${widget.customerPhoneNumber}/chat_status'); // <<<--- Инициализируем ссылку на статус
       _isChatRefInitialized = true;
       _listenToMessages();
+      _listenToChatStatus(); // <<<--- Начинаем слушать статус
     } catch (e) {
       print("Error initializing chat ref in EmployeeChatScreen: $e");
       if (mounted) setState(() => _isLoading = false);
     }
   }
 
+  // <<<--- НОВЫЙ СЛУШАТЕЛЬ СТАТУСА ---
+  void _listenToChatStatus() {
+    if (!_isChatRefInitialized || _statusRef == null) return;
+    _statusSubscription = _statusRef!.onValue.listen((event) {
+      if (!mounted) return;
+      if (event.snapshot.exists && event.snapshot.value != null) {
+        setState(() {
+          _currentChatStatus = event.snapshot.value as String? ?? 'bot';
+        });
+        print("EmployeeChatScreen: Chat status updated: $_currentChatStatus");
+      } else {
+        setState(() {
+          _currentChatStatus = 'bot';
+        });
+      }
+    }, onError: (error) {
+      print("Error listening to chat status in EmployeeChatScreen: $error");
+      if (mounted) setState(() => _currentChatStatus = 'bot');
+    });
+  }
+  // <<<--- КОНЕЦ СЛУШАТЕЛЯ СТАТУСА ---
+
   void _listenToMessages() {
     if (!_isChatRefInitialized || _chatRef == null) return;
-
     setState(() => _isLoading = true);
     _messagesSubscription =
         _chatRef!.orderByChild('timestamp').onValue.listen((event) {
-      // Используем ! после проверки
       if (!mounted) return;
       final List<ChatMessage> loadedMessages = [];
       if (event.snapshot.exists && event.snapshot.value != null) {
@@ -100,40 +128,42 @@ class _EmployeeChatScreenState extends State<EmployeeChatScreen> {
     }, onError: (error) {
       print("Error listening to messages: $error");
       if (mounted) {
-        setState(() => _isLoading = false);
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text("Ошибка загрузки чата: $error")),
-        );
+        setState(() => _isLoading = false); /* ... SnackBar ... */
       }
     });
   }
 
   Future<void> _sendMessage() async {
     if (!_isChatRefInitialized || _chatRef == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text("Ошибка чата. Не удалось отправить.")));
-      return;
+      /* ... */ return;
     }
     if (_messageController.text.trim().isEmpty || _currentUser?.email == null)
       return;
 
     final message = {
-      'sender': _currentUser!.email, // Сотрудник отправляет со своим email
-      'sender_type': 'employee', // Тип отправителя
+      'sender': _currentUser!.email,
+      'sender_type': 'employee',
       'message': _messageController.text.trim(),
       'timestamp': DateTime.now().millisecondsSinceEpoch,
     };
 
     try {
-      await _chatRef!.push().set(message); // Используем ! после проверки
+      await _chatRef!.push().set(message);
+
+      // <<<--- ОБНОВЛЕНИЕ СТАТУСА ПРИ ОТВЕТЕ СОТРУДНИКА ---
+      // Если статус был 'bot' или 'waiting', меняем на 'employee'
+      if (_currentChatStatus == 'bot' || _currentChatStatus == 'waiting') {
+        await _statusRef?.set('employee'); // Используем безопасный вызов
+        print("Chat status set to 'employee' by employee response.");
+        // Статус обновится через слушатель _listenToChatStatus
+      }
+      // <<<--- КОНЕЦ ОБНОВЛЕНИЯ СТАТУСА ---
+
       _messageController.clear();
       _scrollToBottom();
     } catch (e) {
       print("Error sending message: $e");
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text("Ошибка отправки сообщения: $e")));
-      }
+      if (mounted) {/* ... SnackBar ... */}
     }
   }
 
@@ -226,9 +256,95 @@ class _EmployeeChatScreenState extends State<EmployeeChatScreen> {
   }
   // --- Конец диалога заказов ---
 
+  // --- Функция подтверждения и завершения чата сотрудником ---
+  Future<void> _confirmAndEndChat(BuildContext context) async {
+    final bool? confirmed = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (BuildContext context) {
+        /* ... Диалог подтверждения ... */
+        return AlertDialog(
+          title: Text('Завершить диалог?'),
+          content: Text('Клиент снова будет общаться с ботом. Вы уверены?'),
+          actions: <Widget>[
+            TextButton(
+              child: Text('Отмена'),
+              onPressed: () => Navigator.of(context).pop(false),
+            ),
+            TextButton(
+              child: Text('Да, завершить'),
+              style: TextButton.styleFrom(foregroundColor: Colors.orange[900]),
+              onPressed: () => Navigator.of(context).pop(true),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (confirmed != true) return; // Выход если не подтвердили
+
+    if (!mounted) return;
+    print("Ending chat session with customer: ${widget.customerPhoneNumber}");
+
+    // Показываем индикатор
+    showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (context) => Center(child: CircularProgressIndicator()));
+
+    // Ссылка на статус клиента (уже инициализирована в initState)
+    // final statusRef = FirebaseDatabase.instance.ref('users/customers/${widget.customerPhoneNumber}/chat_status');
+    // Ссылка на чат (уже инициализирована)
+    // final chatRef = FirebaseDatabase.instance.ref('chats/${widget.pickupPointId}/${widget.customerPhoneNumber}');
+
+    // Системное сообщение
+    final systemMessage = {
+      'sender': 'system',
+      'sender_type': 'system',
+      'message':
+          'Сотрудник завершил консультацию. Если у вас остались вопросы, бот постарается помочь.',
+      'timestamp': DateTime.now().millisecondsSinceEpoch,
+    };
+
+    try {
+      // Используем ссылки, инициализированные в initState
+      if (_statusRef != null) {
+        await _statusRef!.set('bot'); // Меняем статус на 'bot'
+      } else {
+        throw Exception("Status reference is null");
+      }
+
+      if (_chatRef != null) {
+        await _chatRef!.push().set(systemMessage); // Отправляем сообщение
+      } else {
+        throw Exception("Chat reference is null");
+      }
+
+      Navigator.of(context).pop(); // Убираем индикатор загрузки
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Диалог завершен. Клиент передан боту.')),
+        );
+        // Можно закрыть этот экран после завершения
+        // Navigator.of(context).pop();
+      }
+    } catch (e) {
+      Navigator.of(context).pop(); // Убираем индикатор при ошибке
+      print("Error ending chat: $e");
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Ошибка завершения диалога: $e')),
+        );
+      }
+    }
+  }
+  // --- Конец функции завершения чата ---
+
   @override
   Widget build(BuildContext context) {
     if (!_isChatRefInitialized) {
+      // Проверка инициализации
       return Scaffold(
         appBar: AppBar(title: Text(widget.customerName)),
         body: Center(child: Text("Ошибка инициализации чата.")),
@@ -236,14 +352,24 @@ class _EmployeeChatScreenState extends State<EmployeeChatScreen> {
     }
     return Scaffold(
       appBar: AppBar(
-        title: Text(widget.customerName), // Имя или номер клиента
+        title: Text(widget.customerName),
         backgroundColor: Colors.deepPurple,
         actions: [
           IconButton(
-            icon: Icon(Icons.list_alt), // Иконка заказов
+            icon: Icon(Icons.list_alt),
             tooltip: 'Посмотреть заказы клиента',
-            onPressed: _showCustomerOrdersDialog, // Вызов диалога
+            onPressed: _showCustomerOrdersDialog,
           ),
+          // --- КНОПКА ЗАВЕРШЕНИЯ ДИАЛОГА ---
+          // Показываем кнопку, только если диалог ведет сотрудник
+          if (_currentChatStatus == 'employee')
+            IconButton(
+              icon: Icon(Icons.done_all),
+              tooltip: 'Завершить диалог (передать боту)',
+              onPressed: () =>
+                  _confirmAndEndChat(context), // Вызываем функцию подтверждения
+            ),
+          // --- КОНЕЦ КНОПКИ ЗАВЕРШЕНИЯ ---
         ],
       ),
       body: Column(
@@ -259,7 +385,6 @@ class _EmployeeChatScreenState extends State<EmployeeChatScreen> {
                         itemCount: _messages.length,
                         itemBuilder: (context, index) {
                           final message = _messages[index];
-                          // Сообщения сотрудника (sender_type == 'employee') справа
                           final isMe = message.senderType == 'employee';
                           return _buildMessageBubble(message, isMe);
                         },
@@ -312,20 +437,50 @@ class _EmployeeChatScreenState extends State<EmployeeChatScreen> {
     );
   }
 
-  // Виджет для "пузыря" сообщения (такой же, как в chat_tab)
+  // Виджет для "пузыря" сообщения
   Widget _buildMessageBubble(ChatMessage message, bool isMe) {
+    // ... (Код _buildMessageBubble остается без изменений, как в предыдущем ответе) ...
     final alignment = isMe ? CrossAxisAlignment.end : CrossAxisAlignment.start;
     final bubbleAlignment =
         isMe ? MainAxisAlignment.end : MainAxisAlignment.start;
-    final color = isMe ? Colors.deepPurple[400] : Colors.grey[300];
-    final textColor = isMe ? Colors.white : Colors.black87;
+    Color bubbleColor;
+    Color textColor;
+    switch (message.senderType) {
+      case 'customer':
+        bubbleColor = Colors.grey[300]!;
+        textColor = Colors.black87;
+        break;
+      case 'employee':
+        bubbleColor = Colors.deepPurple[400]!;
+        textColor = Colors.white;
+        break; // Сотрудник теперь справа
+      case 'bot':
+        bubbleColor = Colors.blueGrey[100]!;
+        textColor = Colors.black87;
+        break;
+      case 'system':
+        return Container(
+          padding: EdgeInsets.symmetric(vertical: 8.0, horizontal: 16.0),
+          alignment: Alignment.center,
+          child: Text(
+            message.message,
+            textAlign: TextAlign.center,
+            style: TextStyle(
+                color: Colors.grey[600],
+                fontStyle: FontStyle.italic,
+                fontSize: 12),
+          ),
+        );
+      default:
+        bubbleColor = Colors.grey[300]!;
+        textColor = Colors.black87;
+    }
     final borderRadius = BorderRadius.only(
       topLeft: Radius.circular(16),
       topRight: Radius.circular(16),
       bottomLeft: isMe ? Radius.circular(16) : Radius.circular(0),
       bottomRight: isMe ? Radius.circular(0) : Radius.circular(16),
     );
-
     return Container(
       margin: const EdgeInsets.symmetric(vertical: 4.0),
       child: Row(
@@ -337,7 +492,7 @@ class _EmployeeChatScreenState extends State<EmployeeChatScreen> {
               padding:
                   const EdgeInsets.symmetric(horizontal: 14.0, vertical: 10.0),
               decoration: BoxDecoration(
-                color: color,
+                color: bubbleColor,
                 borderRadius: borderRadius,
               ),
               constraints: BoxConstraints(

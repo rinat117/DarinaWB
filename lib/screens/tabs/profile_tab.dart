@@ -9,6 +9,8 @@ import '../../models/order_item.dart'; // Ensure paths are correct
 import '../../models/review.dart'; // Ensure paths are correct
 import '../../widgets/order_status_indicator.dart'; // Ensure paths are correct
 import '../booking_screen.dart'; // Ensure paths are correct
+import '../login_screen.dart'; // <<<--- ДОБАВЛЕН НУЖНЫЙ ИМПОРТ
+import '../../widgets/pickup_code_dialog.dart';
 
 class ProfileTab extends StatefulWidget {
   final User user;
@@ -45,6 +47,32 @@ class _ProfileTabState extends State<ProfileTab> {
     _commentController.dispose(); // Dispose the controller
     super.dispose();
   }
+
+// --- Функция Выхода ---
+  Future<void> _signOut() async {
+    try {
+      await FirebaseAuth.instance.signOut();
+      print("User signed out");
+      // Возвращаемся на экран входа и удаляем все экраны позади
+      if (mounted) {
+        // Проверка, что виджет еще существует
+        Navigator.of(context).pushAndRemoveUntil(
+          MaterialPageRoute(
+              builder: (context) =>
+                  const LoginScreen()), // Переход на LoginScreen
+          (Route<dynamic> route) => false, // Удаляем все предыдущие маршруты
+        );
+      }
+    } catch (e) {
+      print("Error signing out: $e");
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text("Ошибка выхода: $e")),
+        );
+      }
+    }
+  }
+  // --- Конец функции выхода ---
 
   // Function to load user, order, and review data
   Future<void> _loadData() async {
@@ -397,15 +425,13 @@ class _ProfileTabState extends State<ProfileTab> {
         title: const Text('Моё'),
         backgroundColor: Colors.deepPurple,
         actions: [
+          // --- КНОПКА ВЫХОДА В APPBAR ---
           IconButton(
             icon: Icon(Icons.logout),
             tooltip: 'Выйти',
-            onPressed: () async {
-              await FirebaseAuth.instance.signOut();
-              // Maybe navigate to LoginScreen
-              // Navigator.of(context).pushAndRemoveUntil(MaterialPageRoute(builder: (context) => LoginScreen()), (Route<dynamic> route) => false);
-            },
+            onPressed: _signOut, // Вызываем функцию выхода
           )
+          // --- КОНЕЦ КНОПКИ ВЫХОДА ---
         ],
       ),
       body: RefreshIndicator(
@@ -593,8 +619,10 @@ class _ProfileTabState extends State<ProfileTab> {
                                               contentPadding: EdgeInsets.zero,
                                               leading: GestureDetector(
                                                 onTap: () =>
-                                                    _showEnlargedQrDialog(
-                                                        context, item.qrCode),
+                                                    showPickupCodeDialog(
+                                                        context,
+                                                        item.qrCode,
+                                                        item.article),
                                                 child: QrImageView(
                                                   data: item.qrCode.isNotEmpty
                                                       ? item.qrCode
@@ -615,15 +643,15 @@ class _ProfileTabState extends State<ProfileTab> {
                                                                       .red))),
                                                 ),
                                               ),
-                                              title: Text(
-                                                  'Артикул: ${item.article}'),
+                                              title:
+                                                  Text('Код: ${item.article}'),
                                               subtitle: Text(
                                                   'Кол-во: ${item.quantity}'),
                                               trailing: IconButton(
                                                 icon: Icon(Icons.copy_outlined,
                                                     size: 20,
                                                     color: Colors.grey[600]),
-                                                tooltip: 'Копировать артикул',
+                                                tooltip: 'Копировать Код',
                                                 onPressed: () {
                                                   if (item.article.isNotEmpty &&
                                                       item.article != 'N/A') {
@@ -637,7 +665,7 @@ class _ProfileTabState extends State<ProfileTab> {
                                                                 .showSnackBar(
                                                               SnackBar(
                                                                 content: Text(
-                                                                    'Артикул "${item.article}" скопирован!'),
+                                                                    'Код "${item.article}" скопирован!'),
                                                                 duration:
                                                                     Duration(
                                                                         seconds:
@@ -650,7 +678,7 @@ class _ProfileTabState extends State<ProfileTab> {
                                                         .showSnackBar(
                                                       SnackBar(
                                                         content: Text(
-                                                            'Не удалось скопировать артикул'),
+                                                            'Не удалось скопировать Код'),
                                                         duration: Duration(
                                                             seconds: 1),
                                                       ),

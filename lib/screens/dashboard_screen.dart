@@ -29,11 +29,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
     _tabs = [
       HomeTab(pickupPointId: widget.pickupPointId),
       ChatTab(
-          pickupPointId: widget.pickupPointId,
-          user: widget.user), // <<<--- ПЕРЕДАЕМ USER
-      ProfileTab(user: widget.user, pickupPointId: widget.pickupPointId),
-      // Добавь четвертую вкладку, если она нужна для клиента, например "Информация"
-      // const Center(child: Text('Информация')),
+        pickupPointId: widget.pickupPointId,
+        user: widget.user,
+      ),
+      ProfileTab(
+        user: widget.user,
+        pickupPointId: widget.pickupPointId,
+      ),
     ];
   }
 
@@ -43,39 +45,93 @@ class _DashboardScreenState extends State<DashboardScreen> {
     });
   }
 
+  final List<IconData> _icons = [
+    Icons.home,
+    Icons.chat_bubble_outline,
+    Icons.person_outline,
+  ];
+
+  final List<String> _labels = [
+    'Главная',
+    'Чат',
+    'Моё',
+  ];
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: IndexedStack(
-        // Используем IndexedStack
-        index: _selectedIndex,
-        children: _tabs,
+      backgroundColor: const Color(0xFFF4F6FA),
+      appBar: PreferredSize(
+        preferredSize: const Size.fromHeight(60),
+        child: Container(
+          decoration: const BoxDecoration(
+            gradient: LinearGradient(
+              colors: [Color(0xFF7F00FF), Color(0xFFE100FF)],
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+            ),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black26,
+                blurRadius: 6,
+                offset: Offset(0, 3),
+              ),
+            ],
+          ),
+          child: AppBar(
+            backgroundColor: Colors.transparent,
+            elevation: 0,
+            title: const Text(
+              'WB Пункт',
+              style: TextStyle(
+                fontSize: 22,
+                fontWeight: FontWeight.w600,
+                color: Colors.white,
+              ),
+            ),
+            centerTitle: true,
+          ),
+        ),
       ),
-      bottomNavigationBar: BottomNavigationBar(
-        type: BottomNavigationBarType.fixed, // Чтобы лейблы не пропадали
-        items: const <BottomNavigationBarItem>[
-          BottomNavigationBarItem(
-            icon: Icon(Icons.home),
-            label: 'Главная',
+      body: AnimatedSwitcher(
+        duration: const Duration(milliseconds: 300),
+        child: IndexedStack(
+          index: _selectedIndex,
+          children: _tabs,
+        ),
+      ),
+      bottomNavigationBar: Container(
+        margin: const EdgeInsets.only(left: 12, right: 12, bottom: 10),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(24),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.deepPurple.withOpacity(0.1),
+              spreadRadius: 4,
+              blurRadius: 12,
+              offset: const Offset(0, 4),
+            ),
+          ],
+        ),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(24),
+          child: BottomNavigationBar(
+            backgroundColor: Colors.white,
+            elevation: 0,
+            type: BottomNavigationBarType.fixed,
+            currentIndex: _selectedIndex,
+            selectedItemColor: const Color(0xFF7F00FF),
+            unselectedItemColor: Colors.grey,
+            onTap: _onItemTapped,
+            items: List.generate(3, (index) {
+              return BottomNavigationBarItem(
+                icon: Icon(_icons[index]),
+                label: _labels[index],
+              );
+            }),
           ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.chat),
-            label: 'Чат',
-          ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.person),
-            label: 'Моё',
-          ),
-          // Если нужна 4я вкладка для клиента:
-          // BottomNavigationBarItem(
-          //   icon: Icon(Icons.info_outline),
-          //   label: 'Инфо',
-          // ),
-        ],
-        currentIndex: _selectedIndex,
-        selectedItemColor: Colors.deepPurple,
-        unselectedItemColor: Colors.grey,
-        onTap: _onItemTapped,
+        ),
       ),
     );
   }
