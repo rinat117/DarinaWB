@@ -1,7 +1,9 @@
+// lib/widgets/pickup_code_dialog.dart
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 
+// Функция теперь просто void и принимает context
 void showPickupCodeDialog(
     BuildContext context, String qrData, String pickupCode) {
   if (qrData.isEmpty && pickupCode.isEmpty) {
@@ -11,219 +13,151 @@ void showPickupCodeDialog(
     return;
   }
 
-  showModalBottomSheet(
+  // Используем showDialog вместо showModalBottomSheet
+  showDialog(
     context: context,
-    isScrollControlled: true,
-    backgroundColor: Colors.transparent,
-    builder: (BuildContext context) {
-      return FractionallySizedBox(
-        heightFactor: 0.7,
-        child: AnimatedContainer(
-          duration: Duration(milliseconds: 400),
-          curve: Curves.easeOutCubic,
-          padding: const EdgeInsets.all(24),
-          decoration: BoxDecoration(
-            gradient: LinearGradient(
-              colors: [Color(0xFF181D29), Color(0xFF232943)],
-              begin: Alignment.topCenter,
-              end: Alignment.bottomCenter,
-            ),
-            borderRadius: BorderRadius.only(
-              topLeft: Radius.circular(32),
-              topRight: Radius.circular(32),
-            ),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withOpacity(0.6),
-                blurRadius: 24,
-                offset: Offset(0, -6),
-              )
-            ],
-          ),
+    barrierDismissible: true, // Можно закрыть тапом вне диалога
+    builder: (BuildContext dialogContext) {
+      // Переименовываем context чтобы не путать
+      return AlertDialog(
+        backgroundColor: Colors.grey[900], // Темный фон диалога
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(24.0), // Сильное скругление
+        ),
+        contentPadding: EdgeInsets.zero, // Убираем стандартные отступы контента
+        insetPadding: EdgeInsets.symmetric(
+            horizontal: 20,
+            vertical: 24), // Отступы самого диалога от краев экрана
+        content: Container(
+          // Обертка для контента
+          padding: const EdgeInsets.all(24.0),
+          width:
+              MediaQuery.of(dialogContext).size.width * 0.85, // Ширина диалога
+          constraints: BoxConstraints(maxWidth: 350), // Макс. ширина
           child: Column(
-            mainAxisSize: MainAxisSize.min,
+            mainAxisSize:
+                MainAxisSize.min, // Занимать минимум места по вертикали
             children: [
-              // --- "Ручка" ---
+              // --- QR Code с белой подложкой ---
               Container(
-                width: 48,
-                height: 5,
-                margin: EdgeInsets.only(bottom: 16),
+                padding: EdgeInsets.all(10), // Отступ вокруг QR
                 decoration: BoxDecoration(
-                  color: Colors.white24,
-                  borderRadius: BorderRadius.circular(3),
+                  color: Colors.white, // Белая подложка
+                  borderRadius:
+                      BorderRadius.circular(16.0), // Скругление подложки
                 ),
-              ),
-              // --- QR Code ---
-              if (qrData.isNotEmpty)
-                Container(
-                  padding: EdgeInsets.all(16),
-                  decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      colors: [Colors.white, Colors.grey[200]!],
-                      begin: Alignment.topLeft,
-                      end: Alignment.bottomRight,
-                    ),
-                    borderRadius: BorderRadius.circular(24),
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.blue.withOpacity(0.08),
-                        blurRadius: 20,
-                        spreadRadius: 4,
+                child: QrImageView(
+                  data: qrData.isNotEmpty
+                      ? qrData
+                      : 'no-data', // Заглушка если нет данных
+                  version: QrVersions.auto,
+                  size: 180.0, // Размер QR
+                  gapless: false,
+                  eyeStyle: QrEyeStyle(
+                    eyeShape: QrEyeShape.square, // Квадратные "глаза"
+                    color: Colors.black,
+                  ),
+                  dataModuleStyle: QrDataModuleStyle(
+                    color: Colors.black,
+                    dataModuleShape:
+                        QrDataModuleShape.square, // Квадратные модули
+                  ),
+                  errorStateBuilder: (cxt, err) {
+                    print("Error generating QR: $err");
+                    return Center(
+                      child: Padding(
+                        padding: const EdgeInsets.all(20.0),
+                        child: Text(
+                          'Ошибка\nотображения\nQR-кода',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                              color: Colors.red.shade300, fontSize: 14),
+                        ),
                       ),
-                    ],
-                  ),
-                  child: QrImageView(
-                    data: qrData,
-                    version: QrVersions.auto,
-                    size: 180,
-                    gapless: false,
-                    eyeStyle: QrEyeStyle(
-                      eyeShape: QrEyeShape.circle,
-                      color: Colors.indigo,
-                    ),
-                    dataModuleStyle: QrDataModuleStyle(
-                      color: Colors.indigo[900],
-                      dataModuleShape: QrDataModuleShape.circle,
-                    ),
-                    errorStateBuilder: (cxt, err) => Center(
-                        child: Text('Ошибка QR',
-                            style: TextStyle(color: Colors.red))),
-                  ),
-                )
-              else
-                Container(
-                  width: 180,
-                  height: 180,
-                  decoration: BoxDecoration(
-                    color: Colors.indigo[700]!.withOpacity(0.15),
-                    borderRadius: BorderRadius.circular(20),
-                  ),
-                  child: Center(
-                    child: Text(
-                      'QR-код\nнедоступен',
-                      textAlign: TextAlign.center,
-                      style: TextStyle(
-                          color: Colors.white70,
-                          fontSize: 16,
-                          fontWeight: FontWeight.w500),
-                    ),
-                  ),
-                ),
-              const SizedBox(height: 24),
-              // --- Заголовок ---
-              Text(
-                'Покажите QR-код, чтобы получить заказ',
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  fontSize: 20,
-                  fontWeight: FontWeight.bold,
-                  letterSpacing: 0.1,
-                  color: Colors.white,
+                    );
+                  },
                 ),
               ),
-              const SizedBox(height: 10),
-              // --- Альтернативный способ ---
+              const SizedBox(height: 20),
+
+              // --- Код получения и кнопка Копировать ---
+              Text(
+                'Код получения:',
+                style: TextStyle(fontSize: 14, color: Colors.grey[400]),
+              ),
+              const SizedBox(height: 5),
               Row(
                 mainAxisAlignment: MainAxisAlignment.center,
+                crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
-                  Icon(Icons.lock_outline, size: 18, color: Colors.indigo[200]),
-                  SizedBox(width: 8),
                   Flexible(
+                    // Чтобы текст кода переносился если длинный
                     child: Text(
-                      'Или назовите телефон и код ',
-                      style: TextStyle(fontSize: 15, color: Colors.grey[300]),
+                      pickupCode.isNotEmpty
+                          ? pickupCode
+                          : '---', // Показываем прочерки если нет кода
+                      style: TextStyle(
+                        fontSize: 28, // Крупный шрифт для кода
+                        fontWeight: FontWeight.bold,
+                        color: Colors.white,
+                        letterSpacing: 2, // Разрядка букв/цифр
+                      ),
+                      textAlign: TextAlign.center,
                     ),
                   ),
-                  if (pickupCode.isNotEmpty)
-                    Text(
-                      pickupCode,
-                      style: TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.w700,
-                        color: Colors.blue[200],
-                        letterSpacing: 2,
-                      ),
+                  if (pickupCode
+                      .isNotEmpty) // Показываем кнопку только если есть код
+                    IconButton(
+                      icon: Icon(Icons.content_copy_rounded,
+                          color: Colors.grey[400], size: 20),
+                      tooltip: 'Скопировать код',
+                      onPressed: () {
+                        Clipboard.setData(ClipboardData(text: pickupCode))
+                            .then((_) {
+                          // Navigator.of(dialogContext).pop(); // Можно закрыть диалог после копирования
+                          ScaffoldMessenger.of(dialogContext).showSnackBar(
+                            SnackBar(
+                              content: Text('Код "$pickupCode" скопирован!'),
+                              duration: Duration(seconds: 2),
+                              backgroundColor: Colors
+                                  .green.shade800, // Зеленый фон для успеха
+                            ),
+                          );
+                        });
+                      },
                     ),
                 ],
               ),
-              const SizedBox(height: 5),
-              Text(
-                'Обновляются ежедневно в 00:00',
-                textAlign: TextAlign.center,
-                style: TextStyle(fontSize: 12, color: Colors.grey[500]),
-              ),
-              const SizedBox(height: 8),
-              Text(
-                'Если заказ в постамате, код для него будет в уведомлениях или доставках',
-                textAlign: TextAlign.center,
-                style: TextStyle(fontSize: 12, color: Colors.grey[500]),
-              ),
-              const SizedBox(height: 32),
-
-              // --- Кнопка "Скопировать код" ---
-              SizedBox(
-                width: double.infinity,
-                child: Container(
-                  decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      colors: [Colors.indigo, Colors.blueAccent],
-                      begin: Alignment.topLeft,
-                      end: Alignment.bottomRight,
-                    ),
-                    borderRadius: BorderRadius.circular(16),
-                  ),
-                  child: ElevatedButton.icon(
-                    style: ElevatedButton.styleFrom(
-                      padding: EdgeInsets.symmetric(vertical: 16),
-                      backgroundColor: Colors.transparent,
-                      shadowColor: Colors.blue[100],
-                      elevation: 6,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(16),
-                      ),
-                      // foregroundColor: Colors.white, // если нужно
-                    ),
-                    icon: Icon(Icons.copy_rounded, color: Colors.white),
-                    label: Text(
-                      'Скопировать код',
-                      style: TextStyle(
-                          fontSize: 16,
-                          color: Colors.white,
-                          fontWeight: FontWeight.w600),
-                    ),
-                    onPressed: pickupCode.isNotEmpty
-                        ? () {
-                            Clipboard.setData(ClipboardData(text: pickupCode))
-                                .then((_) {
-                              Navigator.of(context).pop();
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                SnackBar(
-                                    content:
-                                        Text('Код "$pickupCode" скопирован!'),
-                                    duration: Duration(seconds: 1)),
-                              );
-                            });
-                          }
-                        : null,
-                  ),
-                ),
-              ),
               const SizedBox(height: 16),
-              // --- Кнопка "Закрыть" ---
-              TextButton.icon(
-                onPressed: () {
-                  Navigator.of(context).pop();
-                },
-                icon: Icon(Icons.close_rounded, color: Colors.grey[400]),
-                label: Text(
-                  'Закрыть',
-                  style: TextStyle(
-                      fontSize: 15,
-                      color: Colors.grey[400],
-                      fontWeight: FontWeight.w500),
+
+              // --- Информационный текст ---
+              Text(
+                'Покажите QR-код или назовите код сотруднику пункта выдачи для получения заказа.',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                    fontSize: 13, color: Colors.grey[400], height: 1.4),
+              ),
+              const SizedBox(height: 24),
+
+              // --- Кнопка Закрыть ---
+              SizedBox(
+                width: double.infinity, // Кнопка на всю ширину
+                child: TextButton(
+                  style: TextButton.styleFrom(
+                      padding: EdgeInsets.symmetric(vertical: 12),
+                      backgroundColor:
+                          Colors.white.withOpacity(0.1), // Полупрозрачный фон
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12))),
+                  child: Text(
+                    'Закрыть',
+                    style: TextStyle(color: Colors.white70, fontSize: 16),
+                  ),
+                  onPressed: () {
+                    Navigator.of(dialogContext).pop(); // Закрываем диалог
+                  },
                 ),
               ),
-              SizedBox(height: 8),
             ],
           ),
         ),

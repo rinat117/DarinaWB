@@ -6,11 +6,13 @@ import 'package:intl/intl.dart';
 import '../../models/chat_message.dart'; // Убедись, что путь верный
 import '../../models/order.dart'; // Для показа заказов
 import '../../models/order_item.dart'; // Для показа заказов
+import '../../widgets/order_status_indicator.dart'; // <<<--- ДОБАВИТЬ ЭТОТ ИМПОРТ
+import '../../widgets/pickup_code_dialog.dart'; // <<<--- ДОБАВИТЬ ЭТОТ ИМПОРТ
 
 class EmployeeChatScreen extends StatefulWidget {
   final String pickupPointId;
   final String customerPhoneNumber; // Номер телефона *без* '+'
-  final String customerName; // Имя или номер для отображения
+  final String customerName;
 
   const EmployeeChatScreen({
     Key? key,
@@ -29,14 +31,22 @@ class _EmployeeChatScreenState extends State<EmployeeChatScreen> {
   List<ChatMessage> _messages = [];
   bool _isLoading = true;
   StreamSubscription? _messagesSubscription;
-  User? _currentUser; // Сотрудник
+  User? _currentUser;
 
-  DatabaseReference? _chatRef; // Ссылка на ветку чата
-  DatabaseReference? _statusRef; // <<<--- Ссылка на статус чата клиента
-  String _currentChatStatus =
-      'bot'; // <<<--- Текущий статус чата (для логики кнопки Завершить)
-  StreamSubscription? _statusSubscription; // <<<--- Слушатель статуса
+  DatabaseReference? _chatRef;
+  DatabaseReference? _statusRef;
+  String _currentChatStatus = 'bot';
+  StreamSubscription? _statusSubscription;
   bool _isChatRefInitialized = false;
+
+  // --- Цвета для дизайна ---
+  final Color primaryColor = const Color(0xFF7F00FF);
+  final Color accentColor = const Color(0xFFCB11AB);
+  final Color customerBubbleColor = Colors.grey.shade200; // Для клиента
+  final Color botBubbleColor = Colors.blueGrey[50]!; // Для бота
+  final Color systemTextColor = Colors.grey[600]!;
+  final Color inputBackgroundColor = Colors.white;
+  final Color backgroundColor = Colors.grey[50]!;
 
   @override
   void initState() {
@@ -179,22 +189,25 @@ class _EmployeeChatScreenState extends State<EmployeeChatScreen> {
     });
   }
 
-  // --- Диалог для показа заказов клиента ---
+  // --- ОБНОВЛЕННЫЙ Диалог для показа заказов клиента ---
   Future<void> _showCustomerOrdersDialog() async {
     if (!mounted) return;
-    // Показываем индикатор загрузки, пока грузим заказы
+    // Показываем стандартный индикатор загрузки
     showDialog(
       context: context,
       barrierDismissible: false,
-      builder: (context) => Center(child: CircularProgressIndicator()),
+      builder: (context) => const Center(child: CircularProgressIndicator()),
     );
 
     final dbRef = FirebaseDatabase.instance.ref();
     List<Order> customerOrders = [];
+    String errorMessage = ''; // Для отображения ошибки в диалоге
+
     try {
       final ordersSnapshot = await dbRef
           .child('users/customers/${widget.customerPhoneNumber}/orders')
           .get();
+
       if (ordersSnapshot.exists && ordersSnapshot.value != null) {
         final ordersMap = ordersSnapshot.value as Map<dynamic, dynamic>;
         ordersMap.forEach((key, value) {
@@ -211,50 +224,185 @@ class _EmployeeChatScreenState extends State<EmployeeChatScreen> {
       }
     } catch (e) {
       print("Error fetching orders for dialog: $e");
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text("Ошибка загрузки заказов клиента: $e")),
-        );
-      }
+      errorMessage = "Ошибка загрузки заказов клиента: $e";
     } finally {
       Navigator.of(context).pop(); // Убираем индикатор загрузки
     }
 
-    // Показываем диалог с заказами (или сообщение, если их нет)
+    // Показываем новый стилизованный диалог
     if (!mounted) return;
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
-        title: Text("Заказы ${widget.customerName}"),
-        content: Container(
-          width: double.maxFinite,
-          child: customerOrders.isEmpty
-              ? Text("У клиента нет заказов в этом пункте выдачи.")
-              : ListView.builder(
-                  shrinkWrap: true,
-                  itemCount: customerOrders.length,
-                  itemBuilder: (context, index) {
-                    final order = customerOrders[index];
-                    return ListTile(
-                      title: Text("Заказ от ${order.orderDate}"),
-                      subtitle: Text(
-                          "Статус: ${order.orderStatus}\nТоваров: ${order.items.length}"),
-                      isThreeLine: true,
-                      dense: true,
-                    );
-                  },
+      builder: (BuildContext dialogContext) {
+        return AlertDialog(
+          backgroundColor: Colors.grey[900], // Темный фон
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(16.0)),
+          titlePadding:
+              const EdgeInsets.fromLTRB(20, 20, 10, 10), // Отступы заголовка
+          contentPadding: const EdgeInsets.fromLTRB(
+              0, 0, 0, 10), // Отступы контента (убраны боковые)
+          actionsPadding:
+              const EdgeInsets.fromLTRB(20, 0, 20, 15), // Отступы кнопок
+          // Заголовок с именем клиента и крестиком
+          title: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Expanded(
+                child: Text(
+                  'Заказы ${widget.customerName}',
+                  style: TextStyle(color: Colors.white, fontSize: 18),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                 ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: Text("Закрыть"),
+              ),
+              IconButton(
+                icon: Icon(Icons.close, color: Colors.grey[500], size: 22),
+                padding: EdgeInsets.zero,
+                constraints: BoxConstraints(),
+                visualDensity: VisualDensity.compact,
+                onPressed: () => Navigator.of(dialogContext).pop(),
+              )
+            ],
           ),
-        ],
-      ),
+          // Основной контент диалога
+          content: Container(
+            width: double.maxFinite, // Занять доступную ширину
+            constraints: BoxConstraints(
+                maxHeight: MediaQuery.of(context).size.height *
+                    0.6), // Ограничение высоты
+            child: (errorMessage.isNotEmpty) // Если была ошибка загрузки
+                ? Center(
+                    child: Padding(
+                        padding: const EdgeInsets.all(20.0),
+                        child: Text(errorMessage,
+                            style: TextStyle(color: Colors.red[300]))))
+                : (customerOrders.isEmpty) // Если заказов нет
+                    ? Center(
+                        child: Padding(
+                            padding: const EdgeInsets.all(30.0),
+                            child: Text("У клиента нет заказов в этом ПВЗ.",
+                                style: TextStyle(color: Colors.grey[400]))))
+                    // Если заказы есть - показываем список
+                    : ListView.builder(
+                        shrinkWrap:
+                            true, // Важно для ListView внутри AlertDialog
+                        padding: EdgeInsets.symmetric(
+                            horizontal: 20), // Боковые отступы для списка
+                        itemCount: customerOrders.length,
+                        itemBuilder: (context, index) {
+                          final order = customerOrders[index];
+                          // --- Карточка Отдельного Заказа ---
+                          return Card(
+                            color: Colors.grey[850], // Цвет карточки заказа
+                            margin: EdgeInsets.only(bottom: 12),
+                            shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(10)),
+                            elevation: 1,
+                            child: Padding(
+                              padding: const EdgeInsets.all(12.0),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  // ID и Дата
+                                  Row(
+                                    mainAxisAlignment:
+                                        MainAxisAlignment.spaceBetween,
+                                    children: [
+                                      Text("Заказ #${order.id.split('_').last}",
+                                          style: TextStyle(
+                                              fontWeight: FontWeight.bold,
+                                              color: Colors.white,
+                                              fontSize: 14)),
+                                      Text(order.orderDate,
+                                          style: TextStyle(
+                                              color: Colors.grey[400],
+                                              fontSize: 12)),
+                                    ],
+                                  ),
+                                  SizedBox(height: 8),
+                                  // Статус заказа
+                                  OrderStatusIndicator(
+                                      orderStatus: order.orderStatus),
+                                  SizedBox(height: 10),
+                                  // Товары (если есть)
+                                  if (order.items.isNotEmpty) ...[
+                                    Text("Товары:",
+                                        style: TextStyle(
+                                            color: Colors.grey[400],
+                                            fontSize: 13)),
+                                    SizedBox(height: 4),
+                                    // Используем Column для товаров внутри карточки
+                                    Column(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: order.items
+                                          .map((item) => InkWell(
+                                                // Делаем строку кликабельной
+                                                onTap: () => showPickupCodeDialog(
+                                                    context,
+                                                    item.qrCode,
+                                                    item.article), // Показываем диалог QR/кода
+                                                borderRadius: BorderRadius.circular(
+                                                    6), // Скругление для области нажатия
+                                                child: Padding(
+                                                  padding: const EdgeInsets
+                                                      .symmetric(vertical: 5.0),
+                                                  child: Row(
+                                                    children: [
+                                                      Icon(
+                                                          Icons
+                                                              .qr_code_scanner_rounded,
+                                                          color:
+                                                              Colors.grey[500],
+                                                          size:
+                                                              18), // Иконка QR
+                                                      SizedBox(width: 8),
+                                                      Expanded(
+                                                          child: Text(
+                                                              'Код: ${item.article}',
+                                                              style: TextStyle(
+                                                                  color: Colors
+                                                                          .grey[
+                                                                      300],
+                                                                  fontSize:
+                                                                      13))),
+                                                      Text(
+                                                          '( ${item.quantity} шт. )',
+                                                          style: TextStyle(
+                                                              color: Colors
+                                                                  .grey[500],
+                                                              fontSize: 13)),
+                                                    ],
+                                                  ),
+                                                ),
+                                              ))
+                                          .toList(), // Преобразуем map в список виджетов
+                                    ),
+                                  ] else
+                                    Text("Нет товаров в заказе",
+                                        style: TextStyle(
+                                            color: Colors.grey[500],
+                                            fontSize: 13)),
+                                ],
+                              ),
+                            ),
+                          );
+                          // --- Конец Карточки Заказа ---
+                        },
+                      ),
+          ),
+          // Кнопки действий диалога
+          actions: <Widget>[
+            TextButton(
+              child: Text("Закрыть", style: TextStyle(color: Colors.grey[400])),
+              onPressed: () => Navigator.of(dialogContext).pop(),
+            ),
+          ],
+        );
+      },
     );
   }
-  // --- Конец диалога заказов ---
+  // --- Конец ОБНОВЛЕННОГО Диалога ---
 
   // --- Функция подтверждения и завершения чата сотрудником ---
   Future<void> _confirmAndEndChat(BuildContext context) async {
@@ -344,90 +492,140 @@ class _EmployeeChatScreenState extends State<EmployeeChatScreen> {
   @override
   Widget build(BuildContext context) {
     if (!_isChatRefInitialized) {
-      // Проверка инициализации
       return Scaffold(
-        appBar: AppBar(title: Text(widget.customerName)),
-        body: Center(child: Text("Ошибка инициализации чата.")),
-      );
+          appBar: AppBar(title: Text(widget.customerName)),
+          body: Center(child: Text("Ошибка инициализации чата.")));
     }
     return Scaffold(
+      backgroundColor: backgroundColor, // Светлый фон
       appBar: AppBar(
-        title: Text(widget.customerName),
-        backgroundColor: Colors.deepPurple,
+        // Стилизация AppBar
+        backgroundColor: Colors.white,
+        foregroundColor: Colors.black87,
+        elevation: 1.0,
+        title: Column(
+          // Имя и номер телефона
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(widget.customerName,
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
+            Text('+${widget.customerPhoneNumber}',
+                style: TextStyle(
+                    fontSize: 12,
+                    color: Colors
+                        .grey[600])), // Добавляем + обратно для отображения
+          ],
+        ),
         actions: [
+          // Кнопка просмотра заказов
           IconButton(
-            icon: Icon(Icons.list_alt),
+            icon: Icon(Icons.list_alt_outlined,
+                color: primaryColor), // Иконка заказов
             tooltip: 'Посмотреть заказы клиента',
             onPressed: _showCustomerOrdersDialog,
           ),
-          // --- КНОПКА ЗАВЕРШЕНИЯ ДИАЛОГА ---
-          // Показываем кнопку, только если диалог ведет сотрудник
+          // Кнопка завершения диалога (если активен сотрудник)
           if (_currentChatStatus == 'employee')
             IconButton(
-              icon: Icon(Icons.done_all),
+              icon: Icon(Icons.done_all_rounded,
+                  color: Colors.green.shade700), // Иконка завершения
               tooltip: 'Завершить диалог (передать боту)',
-              onPressed: () =>
-                  _confirmAndEndChat(context), // Вызываем функцию подтверждения
+              onPressed: () => _confirmAndEndChat(context),
             ),
-          // --- КОНЕЦ КНОПКИ ЗАВЕРШЕНИЯ ---
         ],
       ),
       body: Column(
         children: [
+          // --- Список сообщений ---
           Expanded(
             child: _isLoading
-                ? Center(child: CircularProgressIndicator())
+                ? Center(child: CircularProgressIndicator(color: primaryColor))
                 : _messages.isEmpty
-                    ? Center(child: Text("Нет сообщений."))
+                    ? Center(
+                        child: Text("Нет сообщений.",
+                            style: TextStyle(color: Colors.grey[600])))
                     : ListView.builder(
                         controller: _scrollController,
-                        padding: EdgeInsets.all(8.0),
+                        padding: EdgeInsets.symmetric(
+                            vertical: 10.0, horizontal: 10.0),
                         itemCount: _messages.length,
                         itemBuilder: (context, index) {
                           final message = _messages[index];
-                          final isMe = message.senderType == 'employee';
-                          return _buildMessageBubble(message, isMe);
+                          // ВАЖНО: isMe теперь true, если отправитель - сотрудник
+                          final bool isMe = message.senderType == 'employee';
+                          return _buildMessageBubble(
+                              message, isMe); // Используем обновленный виджет
                         },
                       ),
           ),
-          // Поле ввода
+
+          // --- Поле ввода (стиль как у клиента) ---
           Container(
-            decoration:
-                BoxDecoration(color: Theme.of(context).cardColor, boxShadow: [
-              BoxShadow(
-                offset: Offset(0, -1),
-                blurRadius: 4,
-                color: Colors.black.withOpacity(0.1),
-              )
-            ]),
             padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 8.0)
                 .copyWith(
                     bottom: MediaQuery.of(context).padding.bottom / 2 + 8),
+            decoration: BoxDecoration(
+              color: inputBackgroundColor,
+              boxShadow: [
+                BoxShadow(
+                    offset: Offset(0, -2),
+                    blurRadius: 6,
+                    color: Colors.black.withOpacity(0.05))
+              ],
+            ),
             child: Row(
+              crossAxisAlignment: CrossAxisAlignment.end,
               children: [
                 Expanded(
                   child: TextField(
                     controller: _messageController,
-                    decoration: InputDecoration(
-                      hintText: 'Введите ответ...',
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(20),
-                        borderSide: BorderSide.none,
-                      ),
-                      filled: true,
-                      fillColor: Colors.grey[200],
-                      contentPadding:
-                          EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                    ),
                     textCapitalization: TextCapitalization.sentences,
                     minLines: 1,
                     maxLines: 5,
+                    decoration: InputDecoration(
+                      hintText: 'Введите ответ...',
+                      hintStyle: TextStyle(color: Colors.grey[500]),
+                      border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(24),
+                          borderSide: BorderSide(color: Colors.grey[300]!)),
+                      enabledBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(24),
+                          borderSide: BorderSide(color: Colors.grey[300]!)),
+                      focusedBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(24),
+                          borderSide:
+                              BorderSide(color: primaryColor, width: 1.5)),
+                      filled: true,
+                      fillColor: Colors.white,
+                      contentPadding:
+                          EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                    ),
+                    onSubmitted: (_) => _sendMessage(),
                   ),
                 ),
                 SizedBox(width: 8),
-                IconButton(
-                  icon: const Icon(Icons.send, color: Colors.deepPurple),
-                  onPressed: _sendMessage,
+                InkWell(
+                  onTap: _messageController.text.trim().isEmpty
+                      ? null
+                      : _sendMessage,
+                  borderRadius: BorderRadius.circular(24),
+                  child: Container(
+                    padding: EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      gradient: _messageController.text.trim().isEmpty
+                          ? null
+                          : LinearGradient(
+                              colors: [accentColor, primaryColor],
+                              begin: Alignment.bottomLeft,
+                              end: Alignment.topRight),
+                      color: _messageController.text.trim().isEmpty
+                          ? Colors.grey[300]
+                          : null,
+                      shape: BoxShape.circle,
+                    ),
+                    child:
+                        Icon(Icons.send_rounded, color: Colors.white, size: 24),
+                  ),
                 ),
               ],
             ),
@@ -437,36 +635,64 @@ class _EmployeeChatScreenState extends State<EmployeeChatScreen> {
     );
   }
 
-  // Виджет для "пузыря" сообщения
+  // --- ОБНОВЛЕННЫЙ Виджет для пузыря сообщения (стиль инвертирован) ---
   Widget _buildMessageBubble(ChatMessage message, bool isMe) {
-    // ... (Код _buildMessageBubble остается без изменений, как в предыдущем ответе) ...
-    final alignment = isMe ? CrossAxisAlignment.end : CrossAxisAlignment.start;
-    final bubbleAlignment =
-        isMe ? MainAxisAlignment.end : MainAxisAlignment.start;
-    Color bubbleColor;
-    Color textColor;
+    final Alignment bubbleAlignment =
+        isMe ? Alignment.centerRight : Alignment.centerLeft;
+    final Color bubbleColor;
+    final Color textColor;
+    final BorderRadius borderRadius;
+    final Gradient? bubbleGradient;
+
     switch (message.senderType) {
-      case 'customer':
-        bubbleColor = Colors.grey[300]!;
-        textColor = Colors.black87;
-        break;
-      case 'employee':
-        bubbleColor = Colors.deepPurple[400]!;
+      // --- СТИЛИ ПОМЕНЯЛИСЬ МЕСТАМИ ---
+      case 'employee': // СОТРУДНИК (isMe = true) - теперь градиент
+        bubbleColor = Colors.white;
         textColor = Colors.white;
-        break; // Сотрудник теперь справа
-      case 'bot':
-        bubbleColor = Colors.blueGrey[100]!;
+        bubbleGradient = LinearGradient(
+            colors: [
+              accentColor.withOpacity(0.9),
+              primaryColor
+            ], // Можно сделать градиент чуть другим
+            begin: Alignment.bottomLeft,
+            end: Alignment.topRight);
+        borderRadius = BorderRadius.only(
+          topLeft: Radius.circular(20), bottomLeft: Radius.circular(20),
+          topRight: Radius.circular(20),
+          bottomRight: Radius.circular(4), // Хвостик справа
+        );
+        break;
+      case 'customer': // КЛИЕНТ (isMe = false) - теперь светлый
+        bubbleColor = customerBubbleColor; // Используем цвет клиента
         textColor = Colors.black87;
+        bubbleGradient = null;
+        borderRadius = BorderRadius.only(
+          topLeft: Radius.circular(4),
+          bottomLeft: Radius.circular(20), // Хвостик слева
+          topRight: Radius.circular(20), bottomRight: Radius.circular(20),
+        );
+        break;
+      // --- ОСТАЛЬНЫЕ СТАТУСЫ КАК БЫЛИ ---
+      case 'bot':
+        bubbleColor = botBubbleColor;
+        textColor = Colors.black87;
+        bubbleGradient = null;
+        borderRadius = BorderRadius.only(
+          topLeft: Radius.circular(4),
+          bottomLeft: Radius.circular(20),
+          topRight: Radius.circular(20),
+          bottomRight: Radius.circular(20),
+        );
         break;
       case 'system':
         return Container(
-          padding: EdgeInsets.symmetric(vertical: 8.0, horizontal: 16.0),
+          padding: EdgeInsets.symmetric(vertical: 10.0, horizontal: 20.0),
           alignment: Alignment.center,
           child: Text(
             message.message,
             textAlign: TextAlign.center,
             style: TextStyle(
-                color: Colors.grey[600],
+                color: systemTextColor,
                 fontStyle: FontStyle.italic,
                 fontSize: 12),
           ),
@@ -474,46 +700,109 @@ class _EmployeeChatScreenState extends State<EmployeeChatScreen> {
       default:
         bubbleColor = Colors.grey[300]!;
         textColor = Colors.black87;
+        bubbleGradient = null;
+        borderRadius = BorderRadius.circular(20);
     }
-    final borderRadius = BorderRadius.only(
-      topLeft: Radius.circular(16),
-      topRight: Radius.circular(16),
-      bottomLeft: isMe ? Radius.circular(16) : Radius.circular(0),
-      bottomRight: isMe ? Radius.circular(0) : Radius.circular(16),
-    );
-    return Container(
-      margin: const EdgeInsets.symmetric(vertical: 4.0),
-      child: Row(
-        mainAxisAlignment: bubbleAlignment,
-        crossAxisAlignment: CrossAxisAlignment.end,
-        children: [
-          Flexible(
-            child: Container(
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 14.0, vertical: 10.0),
-              decoration: BoxDecoration(
-                color: bubbleColor,
-                borderRadius: borderRadius,
-              ),
-              constraints: BoxConstraints(
-                  maxWidth: MediaQuery.of(context).size.width * 0.75),
+
+    // --- Структура пузыря остается такой же ---
+    return Align(
+      alignment: bubbleAlignment,
+      child: Container(
+        margin: const EdgeInsets.symmetric(vertical: 4.0, horizontal: 0),
+        padding: const EdgeInsets.symmetric(horizontal: 14.0, vertical: 10.0),
+        constraints:
+            BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.75),
+        decoration: BoxDecoration(
+            color: bubbleGradient == null ? bubbleColor : null,
+            gradient: bubbleGradient,
+            borderRadius: borderRadius,
+            boxShadow: [
+              BoxShadow(
+                  color: Colors.black.withOpacity(0.05),
+                  blurRadius: 5,
+                  offset: Offset(1, 1))
+            ]),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(message.message,
+                style: TextStyle(color: textColor, fontSize: 15, height: 1.3)),
+            SizedBox(height: 4),
+            Align(
+              alignment: Alignment.centerRight,
               child: Text(
-                message.message,
-                style: TextStyle(color: textColor, fontSize: 15),
+                DateFormat('HH:mm').format(
+                    DateTime.fromMillisecondsSinceEpoch(message.timestamp)),
+                style: TextStyle(
+                    color: isMe ? Colors.white70 : systemTextColor,
+                    fontSize: 10),
               ),
             ),
-          ),
-          SizedBox(width: 6),
-          Padding(
-            padding: const EdgeInsets.only(bottom: 2.0),
-            child: Text(
-              DateFormat('HH:mm').format(
-                  DateTime.fromMillisecondsSinceEpoch(message.timestamp)),
-              style: TextStyle(color: Colors.grey[600], fontSize: 10),
-            ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
 }
+
+// --- Вспомогательный класс _CombinedStreamSubscription и модель CustomerChatInfo ---
+// (Их код нужно либо скопировать сюда, либо вынести в отдельные файлы и импортировать)
+// --- НАЧАЛО КОДА ИЗ EmployeeChatTab ---
+class _CombinedStreamSubscription implements StreamSubscription<dynamic> {
+  final List<StreamSubscription<dynamic>> _subscriptions;
+  _CombinedStreamSubscription(this._subscriptions);
+  @override
+  Future<void> cancel() async {
+    for (var sub in _subscriptions) {
+      await sub.cancel();
+    }
+  }
+
+  @override
+  bool get isPaused => _subscriptions.any((s) => s.isPaused);
+  @override
+  void pause([Future<void>? resumeSignal]) {
+    for (var sub in _subscriptions) {
+      sub.pause(resumeSignal);
+    }
+  }
+
+  @override
+  void resume() {
+    for (var sub in _subscriptions) {
+      sub.resume();
+    }
+  }
+
+  @override
+  Future<E> asFuture<E>([E? futureValue]) => throw UnimplementedError();
+  @override
+  void onData(void Function(dynamic data)? handleData) =>
+      throw UnimplementedError();
+  @override
+  void onDone(void Function()? handleDone) => throw UnimplementedError();
+  @override
+  void onError(Function? handleError) => throw UnimplementedError();
+}
+
+class CustomerChatInfo {
+  final String customerId;
+  String customerName;
+  String lastMessage;
+  int timestamp;
+  String status;
+
+  CustomerChatInfo({
+    required this.customerId,
+    this.customerName = '',
+    this.lastMessage = '',
+    this.timestamp = 0,
+    this.status = 'bot',
+  }) {
+    if (customerName.isEmpty) {
+      customerName = customerId;
+    }
+  }
+}
+// --- КОНЕЦ КОДА ИЗ EmployeeChatTab ---

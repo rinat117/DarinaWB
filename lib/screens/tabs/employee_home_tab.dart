@@ -22,26 +22,32 @@ class EmployeeHomeTab extends StatefulWidget {
 }
 
 class _EmployeeHomeTabState extends State<EmployeeHomeTab> {
+  // --- Состояния ---
   bool _isLoading = true;
   Employee? _employee;
   String _pickupPointId = '';
   String? _pickupPointAddress;
   Map<String, List<Order>> _readyOrdersByCustomer = {};
   List<BookingInfo> _todaysBookings = [];
-  Map<String, String> customerUsernames = {}; // Кэш имен клиентов
-
-  // --- Переменные для поиска ---
-  List<Order> _allPvzOrders = []; // Хранит ВСЕ заказы этого ПВЗ
-  List<Order> _filteredOrders =
-      []; // Хранит отфильтрованные для поиска/отображения
+  Map<String, String> customerUsernames = {};
+  List<Order> _allPvzOrders = [];
+  List<Order> _filteredOrders = [];
   final TextEditingController _searchController = TextEditingController();
-  Map<String, String> _orderIdToPhoneMap =
-      {}; // Карта для связи ID заказа с телефоном клиента
+  Map<String, String> _orderIdToPhoneMap = {};
+  // --- Конец Состояний ---
+
+  // --- Цвета для UI ---
+  final Color primaryColor = Color(0xFF7F00FF);
+  final Color accentColor = Color(0xFFCB11AB);
+  final Color cardBackgroundColor = Colors.white;
+  final Color screenBackgroundColor = Colors.grey[100]!;
+  final Color textColorPrimary = Colors.black87;
+  final Color textColorSecondary = Colors.grey[600]!;
+  // --- Конец Цветов ---
 
   @override
   void initState() {
     super.initState();
-    // Добавляем слушатель для поиска
     _searchController.addListener(() {
       _filterOrders(_searchController.text);
     });
@@ -50,7 +56,7 @@ class _EmployeeHomeTabState extends State<EmployeeHomeTab> {
 
   @override
   void dispose() {
-    _searchController.dispose(); // Очищаем контроллер поиска
+    _searchController.dispose();
     super.dispose();
   }
 
@@ -69,73 +75,50 @@ class _EmployeeHomeTabState extends State<EmployeeHomeTab> {
       _filteredOrders = [];
       _orderIdToPhoneMap = {};
     });
-    // Очищаем поиск при обновлении
-    // _searchController.clear(); // Очистка здесь может быть нежелательной при pull-to-refresh
 
     final user = FirebaseAuth.instance.currentUser;
     if (user == null || user.email == null) {
       print("Error: Employee not logged in or email is null");
       if (mounted) setState(() => _isLoading = false);
-      // TODO: Рассмотреть возможность выхода на экран логина
       return;
     }
 
-    await _loadEmployeeData(user.email!); // Сначала грузим данные сотрудника
+    await _loadEmployeeData(user.email!);
     if (_pickupPointId.isNotEmpty) {
       try {
-        // Грузим все параллельно для ускорения
         await Future.wait([
           _loadPickupPointDetails(_pickupPointId),
-          _loadReadyOrdersAndUsernames(
-              _pickupPointId), // Грузит готовые + кэширует имена
+          _loadReadyOrdersAndUsernames(_pickupPointId),
           _loadTodaysBookings(_pickupPointId),
-          _loadAllPvzOrders(_pickupPointId), // Грузит ВСЕ заказы
+          _loadAllPvzOrders(_pickupPointId),
         ]);
       } catch (e) {
         print("Error during concurrent data loading: $e");
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(content: Text("Ошибка загрузки данных: $e")));
-        }
+        _showErrorSnackBar("Ошибка загрузки данных: $e");
       }
     } else {
-      print(
-          "Cannot load details/orders/bookings: pickupPointId is empty after loading employee data");
-      // Возможно, показать сообщение пользователю
+      print("Cannot load details/orders/bookings: pickupPointId is empty.");
     }
 
-    // Завершаем загрузку только после всех операций
     if (mounted) setState(() => _isLoading = false);
   }
 
   Future<void> _loadEmployeeData(String email) async {
     final dbRef = FirebaseDatabase.instance.ref();
     try {
-      // Адаптируй этот ключ под твою структуру в Firebase employees
       final safeEmailKey = email.replaceAll('.', '_').replaceAll('@', '_');
-      print("Loading employee data for key: $safeEmailKey");
       final snapshot = await dbRef.child('users/employees/$safeEmailKey').get();
-
       if (mounted && snapshot.exists && snapshot.value != null) {
         final employeeData = snapshot.value as Map<dynamic, dynamic>;
-        // Обновляем состояние без setState, т.к. это часть _loadInitialData
         _employee = Employee.fromJson(snapshot.key!, employeeData);
         _pickupPointId = _employee!.pickupPointId;
-        print(
-            "Employee data loaded: ${_employee?.name}, PP ID: $_pickupPointId");
       } else {
-        print("Employee data not found for email: $email (key: $safeEmailKey)");
-        _employee = null;
         _pickupPointId = '';
       }
     } catch (e) {
       print("Error loading employee data: $e");
-      _employee = null;
       _pickupPointId = '';
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text("Ошибка загрузки данных сотрудника: $e")));
-      }
+      _showErrorSnackBar("Ошибка загрузки данных сотрудника: $e");
     }
   }
 
@@ -145,11 +128,8 @@ class _EmployeeHomeTabState extends State<EmployeeHomeTab> {
       final snapshot = await dbRef.child('pickup_points/$pickupPointId').get();
       if (mounted && snapshot.exists && snapshot.value != null) {
         final data = snapshot.value as Map<dynamic, dynamic>;
-        // Обновляем состояние без setState
         _pickupPointAddress = (data['address'] as String?)?.replaceAll('"', '');
-        print("Loaded address: $_pickupPointAddress");
       } else {
-        print("Pickup point details not found for $pickupPointId");
         _pickupPointAddress = null;
       }
     } catch (e) {
@@ -161,36 +141,25 @@ class _EmployeeHomeTabState extends State<EmployeeHomeTab> {
   Future<void> _loadReadyOrdersAndUsernames(String pickupPointId) async {
     final dbRef = FirebaseDatabase.instance.ref();
     Map<String, List<Order>> readyOrdersMap = {};
-    Map<String, String> usernamesMap = {}; // Временная карта имен
-
+    Map<String, String> usernamesMap = {};
     try {
       final customersSnapshot = await dbRef.child('users/customers').get();
       if (customersSnapshot.exists && customersSnapshot.value != null) {
         final customersData = customersSnapshot.value as Map<dynamic, dynamic>;
-
         customersData.forEach((phoneKey, customerData) {
           if (phoneKey == null || phoneKey.toString().isEmpty) return;
           final String safePhoneKey = phoneKey.toString();
-
           if (customerData is Map) {
-            final customerMap = customerData as Map<dynamic, dynamic>;
-            // Сохраняем имя во временную карту
             usernamesMap[safePhoneKey] =
-                customerMap['username']?.toString() ?? safePhoneKey;
-
-            final ordersData = customerMap['orders'];
+                customerData['username']?.toString() ?? safePhoneKey;
+            final ordersData = customerData['orders'];
             if (ordersData is Map) {
-              final orders = ordersData as Map<dynamic, dynamic>;
-              orders.forEach((orderKey, orderValue) {
+              ordersData.forEach((orderKey, orderValue) {
                 if (orderValue is Map) {
                   final order = Order.fromJson(orderKey, orderValue);
-                  // Фильтруем готовые к выдаче для этого ПВЗ
                   if (order.pickupPointId == pickupPointId &&
                       order.orderStatus == 'ready_for_pickup') {
-                    if (!readyOrdersMap.containsKey(safePhoneKey)) {
-                      readyOrdersMap[safePhoneKey] = [];
-                    }
-                    readyOrdersMap[safePhoneKey]!.add(order);
+                    (readyOrdersMap[safePhoneKey] ??= []).add(order);
                   }
                 }
               });
@@ -198,18 +167,12 @@ class _EmployeeHomeTabState extends State<EmployeeHomeTab> {
           }
         });
       }
-      // Обновляем состояние (без setState, т.к. часть Future.wait)
       _readyOrdersByCustomer = readyOrdersMap;
-      customerUsernames = usernamesMap; // Обновляем кэш имен
-      print(
-          "Loaded ${_readyOrdersByCustomer.length} customers with ready orders.");
+      customerUsernames = usernamesMap;
     } catch (e) {
       print("Error loading ready orders/usernames: $e");
-      _readyOrdersByCustomer = {}; // Сброс при ошибке
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text("Ошибка загрузки заказов к выдаче: $e")));
-      }
+      _readyOrdersByCustomer = {};
+      _showErrorSnackBar("Ошибка загрузки заказов к выдаче: $e");
     }
   }
 
@@ -217,42 +180,30 @@ class _EmployeeHomeTabState extends State<EmployeeHomeTab> {
     final dbRef = FirebaseDatabase.instance.ref();
     final todayDate = DateFormat('yyyy-MM-dd').format(DateTime.now());
     List<BookingInfo> bookingsList = [];
-    print("Loading bookings for date: $todayDate");
-
     try {
       final snapshot =
           await dbRef.child('bookings/$pickupPointId/$todayDate').get();
       if (snapshot.exists && snapshot.value != null) {
-        print("Raw Bookings Snapshot for $todayDate: ${snapshot.value}");
         final bookedSlots = snapshot.value as Map<dynamic, dynamic>;
         bookedSlots.forEach((timeSlot, bookingData) {
-          print("Processing booking slot: $timeSlot, data: $bookingData");
           if (bookingData is Map) {
             bookingsList.add(BookingInfo.fromJson(timeSlot, bookingData));
           }
         });
         bookingsList.sort((a, b) => a.timeSlot.compareTo(b.timeSlot));
-      } else {
-        print("No bookings found in snapshot for $todayDate");
       }
-      // Обновляем состояние (без setState)
       _todaysBookings = bookingsList;
-      print("Loaded ${_todaysBookings.length} bookings for today.");
     } catch (e) {
       print("Error loading today's bookings: $e");
-      _todaysBookings = []; // Сброс при ошибке
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text("Ошибка загрузки бронирований: $e")));
-      }
+      _todaysBookings = [];
+      _showErrorSnackBar("Ошибка загрузки бронирований: $e");
     }
   }
 
   Future<void> _loadAllPvzOrders(String pickupPointId) async {
     final dbRef = FirebaseDatabase.instance.ref();
     List<Order> allOrders = [];
-    Map<String, String> orderIdToPhone = {}; // Временная карта
-
+    Map<String, String> orderIdToPhone = {};
     try {
       final customersSnapshot = await dbRef.child('users/customers').get();
       if (customersSnapshot.exists && customersSnapshot.value != null) {
@@ -260,23 +211,19 @@ class _EmployeeHomeTabState extends State<EmployeeHomeTab> {
         customersData.forEach((phoneKey, customerData) {
           if (phoneKey == null || phoneKey.toString().isEmpty) return;
           final String safePhoneKey = phoneKey.toString();
-
           if (customerData is Map) {
-            // Кэшируем имя, если его еще нет (на случай, если клиент не в _readyOrdersByCustomer)
             if (!customerUsernames.containsKey(safePhoneKey)) {
               customerUsernames[safePhoneKey] =
                   customerData['username']?.toString() ?? safePhoneKey;
             }
-
             final ordersData = customerData['orders'];
             if (ordersData is Map) {
               ordersData.forEach((orderKey, orderValue) {
                 if (orderValue is Map) {
                   final order = Order.fromJson(orderKey, orderValue);
                   if (order.pickupPointId == pickupPointId) {
-                    // Фильтр только по ПВЗ
                     allOrders.add(order);
-                    orderIdToPhone[order.id] = safePhoneKey; // Сохраняем связь
+                    orderIdToPhone[order.id] = safePhoneKey;
                   }
                 }
               });
@@ -284,436 +231,452 @@ class _EmployeeHomeTabState extends State<EmployeeHomeTab> {
           }
         });
       }
-      // Обновляем состояние (без setState)
-      allOrders.sort((a, b) => b.orderDate.compareTo(a.orderDate)); // Сортируем
+      allOrders.sort((a, b) => b.orderDate.compareTo(a.orderDate));
       _allPvzOrders = allOrders;
-      _orderIdToPhoneMap = orderIdToPhone; // Сохраняем карту
-      _filteredOrders = []; // Сбрасываем фильтр при полной загрузке
-      print(
-          "Loaded ${_allPvzOrders.length} total orders for PVZ $pickupPointId");
+      _orderIdToPhoneMap = orderIdToPhone;
+      _filteredOrders = []; // Сброс фильтра
     } catch (e) {
       print("Error loading all orders: $e");
-      _allPvzOrders = []; // Сброс при ошибке
+      _allPvzOrders = [];
       _filteredOrders = [];
       _orderIdToPhoneMap = {};
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text("Ошибка загрузки всех заказов: $e")));
-      }
+      _showErrorSnackBar("Ошибка загрузки всех заказов: $e");
     }
   }
+  // --- Конец Функций Загрузки ---
 
   // --- Функция Фильтрации/Поиска ---
   void _filterOrders(String query) {
     final lowerCaseQuery = query.trim().toLowerCase();
-
     if (lowerCaseQuery.isEmpty) {
-      setState(() =>
-          _filteredOrders = []); // Показываем пустой список, если поиск пуст
+      setState(() => _filteredOrders = []);
       return;
     }
-
-    // Фильтруем основной список _allPvzOrders
     final filtered = _allPvzOrders.where((order) {
-      // Поиск по ID заказа
-      if (order.id.toLowerCase().contains(lowerCaseQuery)) {
-        return true;
-      }
-      // Поиск по Коду товара (бывший артикул)
+      if (order.id.toLowerCase().contains(lowerCaseQuery)) return true;
       if (order.items
-          .any((item) => item.article.toLowerCase().contains(lowerCaseQuery))) {
+          .any((item) => item.article.toLowerCase().contains(lowerCaseQuery)))
         return true;
-      }
-      // Поиск по телефону или имени клиента
-      final customerPhone =
-          _orderIdToPhoneMap[order.id]; // Получаем телефон из карты
+      final customerPhone = _orderIdToPhoneMap[order.id];
       if (customerPhone != null) {
-        if (customerPhone.contains(lowerCaseQuery))
-          return true; // Поиск по номеру
+        if (customerPhone.contains(lowerCaseQuery)) return true;
         final customerName =
             customerUsernames[customerPhone]?.toLowerCase() ?? '';
-        if (customerName.contains(lowerCaseQuery))
-          return true; // Поиск по имени
+        if (customerName.contains(lowerCaseQuery)) return true;
       }
       return false;
     }).toList();
-
-    setState(() {
-      _filteredOrders = filtered; // Обновляем список для отображения
-    });
+    setState(() => _filteredOrders = filtered);
   }
+  // --- Конец Функции Фильтрации ---
 
-  // --- Диалог деталей ГОТОВЫХ заказов ---
+  // --- Диалог Выдачи Готовых Заказов ---
   void _showReadyOrderDetailsDialog(
       BuildContext context, String customerPhone, List<Order> orders) {
     String customerDisplay = customerUsernames[customerPhone] ?? customerPhone;
     showDialog(
       context: context,
-      builder: (BuildContext context) {
+      builder: (BuildContext dialogContext) {
         return AlertDialog(
-          title: Text('Готовые заказы для $customerDisplay'),
+          backgroundColor: Colors.grey[900],
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(16.0)),
+          titlePadding: const EdgeInsets.fromLTRB(20, 20, 20, 10),
+          contentPadding: const EdgeInsets.fromLTRB(0, 0, 0, 10),
+          actionsPadding: const EdgeInsets.fromLTRB(20, 0, 20, 15),
+          title: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Expanded(
+                  child: Text('Выдача заказов: $customerDisplay',
+                      style: TextStyle(color: Colors.white, fontSize: 18),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis)),
+              IconButton(
+                icon: Icon(Icons.close, color: Colors.grey[500], size: 22),
+                padding: EdgeInsets.zero,
+                constraints: BoxConstraints(),
+                visualDensity: VisualDensity.compact,
+                onPressed: () => Navigator.of(dialogContext).pop(),
+              )
+            ],
+          ),
           content: Container(
             width: double.maxFinite,
+            constraints: BoxConstraints(
+                maxHeight: MediaQuery.of(context).size.height * 0.5),
             child: ListView.separated(
               shrinkWrap: true,
+              padding: EdgeInsets.symmetric(horizontal: 20),
               itemCount: orders.length,
-              separatorBuilder: (context, index) => Divider(height: 15),
+              separatorBuilder: (context, index) =>
+                  Divider(height: 15, color: Colors.grey[700]),
               itemBuilder: (context, index) {
                 final order = orders[index];
                 return Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text("Заказ ID: ${order.id}",
-                        style: TextStyle(fontWeight: FontWeight.bold)),
-                    SizedBox(height: 5),
-                    ...order.items.map((item) => ListTile(
-                          dense: true,
-                          contentPadding: EdgeInsets.symmetric(vertical: 2),
-                          leading: GestureDetector(
-                            onTap: () => showPickupCodeDialog(
-                                context, item.qrCode, item.article),
-                            child: QrImageView(
-                              data: item.qrCode.isNotEmpty
-                                  ? item.qrCode
-                                  : 'no-qr-code',
-                              version: QrVersions.auto,
-                              size: 40.0,
-                              gapless: false,
-                              errorStateBuilder: (cxt, err) => const SizedBox(
-                                  width: 40,
-                                  height: 40,
-                                  child: Center(
-                                      child: Icon(Icons.error_outline,
-                                          color: Colors.red))),
+                    Text("Заказ #${order.id.split('_').last}",
+                        style: TextStyle(
+                            fontWeight: FontWeight.bold,
+                            color: Colors.white,
+                            fontSize: 15)),
+                    SizedBox(height: 6),
+                    if (order.items.isEmpty)
+                      Text("Нет товаров",
+                          style:
+                              TextStyle(color: Colors.grey[500], fontSize: 13))
+                    else
+                      ...order.items.map((item) => Padding(
+                            padding:
+                                const EdgeInsets.only(left: 8.0, bottom: 4.0),
+                            child: Row(
+                              children: [
+                                InkWell(
+                                    onTap: () => showPickupCodeDialog(
+                                        context, item.qrCode, item.article),
+                                    child: Icon(Icons.qr_code_2_rounded,
+                                        color: Colors.grey[400], size: 20)),
+                                const SizedBox(width: 8),
+                                Expanded(
+                                    child: Text('Код: ${item.article}',
+                                        style: TextStyle(
+                                            color: Colors.grey[300],
+                                            fontSize: 13))),
+                                Text('(${item.quantity} шт.)',
+                                    style: TextStyle(
+                                        color: Colors.grey[500], fontSize: 13)),
+                              ],
                             ),
-                          ),
-                          title: Text("Код: ${item.article}"),
-                          subtitle: Text("Кол-во: ${item.quantity}"),
-                        )),
+                          )),
                   ],
                 );
               },
             ),
           ),
           actions: <Widget>[
+            TextButton(
+              child: Text('Отмена', style: TextStyle(color: Colors.grey[400])),
+              onPressed: () => Navigator.of(dialogContext).pop(),
+            ),
             ElevatedButton.icon(
-              icon: Icon(Icons.check_circle_outline),
-              label: Text('Отметить как выданные'),
-              style: ElevatedButton.styleFrom(backgroundColor: Colors.green),
+              icon: Icon(Icons.check_circle_outline, size: 18),
+              label: Text('Выдать (${orders.length} зак.)'),
+              style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.green.shade700,
+                  foregroundColor: Colors.white,
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8))),
               onPressed: () {
                 _markOrdersAsDelivered(context, customerPhone, orders);
-                Navigator.of(context).pop();
+                Navigator.of(dialogContext).pop();
               },
-            ),
-            TextButton(
-              child: const Text('Закрыть'),
-              onPressed: () => Navigator.of(context).pop(),
             ),
           ],
         );
       },
     );
   }
+  // --- Конец Диалога Выдачи ---
 
-  // --- Отметка ГОТОВЫХ заказов как выданных ---
+  // --- Отметка Готовых Заказов как Выданных ---
   Future<void> _markOrdersAsDelivered(BuildContext context,
       String customerPhone, List<Order> ordersToDeliver) async {
     if (!mounted) return;
-    print(
-        "Marking ${ordersToDeliver.length} orders as delivered for $customerPhone");
-
     showDialog(
         context: context,
         barrierDismissible: false,
         builder: (context) => Center(child: CircularProgressIndicator()));
-
     final dbRef = FirebaseDatabase.instance.ref();
     Map<String, dynamic> updates = {};
     final String newStatus = 'delivered';
-
     for (var order in ordersToDeliver) {
-      final orderStatusPath =
-          'users/customers/$customerPhone/orders/${order.id}/order_status';
-      updates[orderStatusPath] = newStatus;
+      updates['users/customers/$customerPhone/orders/${order.id}/order_status'] =
+          newStatus;
       if (order.bookingSlot != null && order.bookingSlot!.isNotEmpty) {
         try {
           final parts = order.bookingSlot!.split(' ');
-          final formattedDate = parts[0];
-          final formattedTime = parts[1];
-          final bookingPath =
-              'bookings/$_pickupPointId/$formattedDate/$formattedTime';
-          updates[bookingPath] = null; // Удаляем бронь
+          updates['bookings/$_pickupPointId/${parts[0]}/${parts[1]}'] = null;
         } catch (e) {
           print(
               "Error parsing booking slot for deletion: ${order.bookingSlot}");
         }
       }
     }
-
     try {
       await dbRef.update(updates);
       Navigator.of(context).pop(); // Убираем индикатор
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Заказы отмечены как выданные!')));
-        // Перезагружаем данные, чтобы списки обновились
-        await _loadInitialData(); // Проще перезагрузить всё
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text('Заказы отмечены как выданные!'),
+            backgroundColor: Colors.green));
+        await _loadInitialData(); // Перезагружаем данные
       }
     } catch (e) {
       Navigator.of(context).pop();
       print("Error marking orders as delivered: $e");
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Ошибка обновления статуса заказов: $e')));
-      }
+      _showErrorSnackBar('Ошибка обновления статуса заказов: $e');
     }
   }
+  // --- Конец Функции Отметки ---
 
-  // --- НОВЫЙ Диалог Деталей ЛЮБОГО Заказа ---
-  void _showOrderDetailsPopup(BuildContext context, Order order) {
+  // --- Диалог Деталей Любого Заказа (из поиска) ---
+  void _showStyledOrderDetailsDialog(BuildContext context, Order order) {
     final customerPhone = _orderIdToPhoneMap[order.id] ?? 'Не найден';
     final customerDisplay = customerUsernames[customerPhone] ?? customerPhone;
     final List<String> possibleStatuses = [
-      'pending', 'in_transit',
-      'ready_for_pickup', // Можно добавить/убрать ненужные
-    ].toSet().toList(); // Убираем дубликаты
+      'pending',
+      'processing',
+      'in_transit',
+      'ready_for_pickup',
+      'delivered'
+    ].toSet().toList();
+    String? selectedStatus = order.orderStatus;
+    final bool canChangeStatus = order.orderStatus != 'delivered';
 
-    // 2. Получаем текущий статус заказа из объекта order
-    String? currentOrderStatusFromOrder = order.orderStatus;
-
-    // 3. Проверяем, есть ли текущий статус заказа в нашем списке допустимых
-    if (!possibleStatuses.contains(currentOrderStatusFromOrder)) {
-      print(
-          "Warning: Order status '$currentOrderStatusFromOrder' from DB is not in the possibleStatuses list for Dropdown. Displaying as unknown.");
-      // Если статуса нет в списке, мы не можем его выбрать в Dropdown.
-      // Либо добавляем его в possibleStatuses, либо обрабатываем как неизвестный.
-      // Установим selectedStatus в null, чтобы Dropdown показал hint.
-      currentOrderStatusFromOrder = null;
-    }
-    // Используем проверенный статус для инициализации Dropdown
-    String? selectedStatus = currentOrderStatusFromOrder;
-    // --- КОНЕЦ ИСПРАВЛЕНИЯ СТАТУСОВ ---
-
-    showModalBottomSheet(
+    showDialog(
       context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (context) {
-        return StatefulBuilder(// Нужен для обновления Dropdown
-            builder: (BuildContext context, StateSetter setDialogState) {
-          return Padding(
-            padding: EdgeInsets.only(
-                bottom: MediaQuery.of(context).viewInsets.bottom),
-            child: Container(
-              padding: const EdgeInsets.all(20.0),
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.only(
-                  topLeft: Radius.circular(20.0),
-                  topRight: Radius.circular(20.0),
-                ),
-              ),
-              child: Wrap(
+      builder: (BuildContext dialogContext) {
+        return StatefulBuilder(
+          builder: (stfContext, stfSetState) {
+            return AlertDialog(
+              backgroundColor: Colors.grey[900],
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(16.0)),
+              titlePadding: const EdgeInsets.fromLTRB(20, 20, 20, 10),
+              contentPadding: const EdgeInsets.fromLTRB(20, 0, 20, 10),
+              actionsPadding: const EdgeInsets.fromLTRB(20, 0, 20, 15),
+              title: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Expanded(
-                          child: Text('Детали заказа ${order.id}',
-                              style: Theme.of(context).textTheme.titleLarge)),
-                      IconButton(
-                          icon: Icon(Icons.close),
-                          padding: EdgeInsets.zero,
-                          constraints: BoxConstraints(),
-                          onPressed: () => Navigator.pop(context)),
-                    ],
-                  ),
-                  Divider(height: 20),
-                  Text('Клиент: $customerDisplay' +
-                      (customerPhone != 'Не найден'
-                          ? ' ($customerPhone)'
-                          : '')),
-                  Text('Дата: ${order.orderDate}'),
-                  SizedBox(height: 8),
-                  OrderStatusIndicator(
-                      orderStatus: selectedStatus ?? order.orderStatus),
-                  SizedBox(height: 12),
-                  Text('Товары:',
-                      style: TextStyle(fontWeight: FontWeight.bold)),
-                  if (order.items.isEmpty)
-                    Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 8.0),
-                        child: Text('Нет товаров в заказе.'))
-                  else
-                    Container(
-                      constraints: BoxConstraints(maxHeight: 150),
-                      child: ListView(
-                        shrinkWrap: true,
-                        children: order.items
-                            .map((item) => ListTile(
-                                  contentPadding: EdgeInsets.symmetric(
-                                      horizontal: 0, vertical: 0),
-                                  leading: GestureDetector(
-                                    onTap: () => showPickupCodeDialog(
-                                        context, item.qrCode, item.article),
-                                    child: QrImageView(
-                                      data: item.qrCode.isNotEmpty
-                                          ? item.qrCode
-                                          : 'no-qr-code',
-                                      version: QrVersions.auto,
-                                      size: 40.0,
-                                      gapless: false,
-                                      errorStateBuilder: (cxt, err) => SizedBox(
-                                          width: 40,
-                                          height: 40,
-                                          child: Center(
-                                              child: Icon(Icons.error_outline,
-                                                  color: Colors.red))),
-                                    ),
-                                  ),
-                                  title: Text("Код: ${item.article}",
-                                      style: TextStyle(fontSize: 14)),
-                                  subtitle: Text("Кол-во: ${item.quantity}",
-                                      style: TextStyle(fontSize: 13)),
-                                  trailing: IconButton(
-                                    icon: Icon(Icons.copy_outlined,
-                                        size: 18, color: Colors.grey),
-                                    tooltip: 'Копировать код',
-                                    iconSize: 18,
-                                    padding: EdgeInsets.zero,
-                                    constraints: BoxConstraints(),
-                                    onPressed: () {
-                                      if (item.article.isNotEmpty &&
-                                          item.article != 'N/A') {
-                                        Clipboard.setData(ClipboardData(
-                                                text: item.article))
-                                            .then((_) =>
-                                                ScaffoldMessenger.of(context)
-                                                    .showSnackBar(SnackBar(
-                                                  content: Text(
-                                                      'Код "${item.article}" скопирован!'),
-                                                  duration:
-                                                      Duration(seconds: 1),
-                                                )));
-                                      }
-                                    },
-                                  ),
-                                ))
-                            .toList(),
-                      ),
-                    ),
-                  SizedBox(height: 16),
-                  Text('Изменить статус:',
-                      style: TextStyle(fontWeight: FontWeight.bold)),
-                  DropdownButton<String>(
-                    value:
-                        selectedStatus, // Используем selectedStatus (который может быть null)
-                    isExpanded: true,
-                    items: possibleStatuses.map((String statusValue) {
-                      return DropdownMenuItem<String>(
-                        value: statusValue,
-                        // TODO: Отображать человекопонятные названия статусов
-                        child: Text(statusValue),
-                      );
-                    }).toList(),
-                    onChanged: (String? newValue) {
-                      if (newValue != null) {
-                        setDialogState(() {
-                          selectedStatus = newValue;
-                        });
-                      }
-                    },
-                    // Подсказка, если статус не выбран или некорректен
-                    hint: Text(currentOrderStatusFromOrder == null
-                        ? "Статус: ${order.orderStatus} (неизвестный)"
-                        : "Выберите новый статус"),
-                  ),
-                  SizedBox(height: 20),
-                  Row(
-                    // Кнопки
-                    mainAxisAlignment: MainAxisAlignment.end,
-                    children: [
-                      TextButton(
-                        onPressed: () => Navigator.pop(context),
-                        child: Text('Отмена'),
-                      ),
-                      SizedBox(width: 8),
-                      ElevatedButton(
-                        // Кнопка активна, если статус выбран И он отличается от исходного статуса заказа
-                        onPressed: (selectedStatus != null &&
-                                selectedStatus != order.orderStatus)
-                            ? () async {
-                                await _updateOrderStatus(order,
-                                    selectedStatus!); // Передаем выбранный статус
-                                Navigator.pop(context);
-                              }
-                            : null,
-                        child: Text('Сохранить статус'),
-                      ),
-                    ],
-                  ),
-                  SizedBox(height: 10),
+                  Text('Заказ #${order.id.split('_').last}',
+                      style: TextStyle(color: Colors.white, fontSize: 18)),
+                  IconButton(
+                    icon: Icon(Icons.close, color: Colors.grey[500], size: 22),
+                    padding: EdgeInsets.zero,
+                    constraints: BoxConstraints(),
+                    visualDensity: VisualDensity.compact,
+                    onPressed: () => Navigator.of(dialogContext).pop(),
+                  )
                 ],
               ),
-            ),
-          );
-        });
+              content: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    _buildDetailRow(Icons.person_outline,
+                        '$customerDisplay ($customerPhone)', context),
+                    _buildDetailRow(Icons.calendar_today_outlined,
+                        'Дата: ${order.orderDate}', context),
+                    const SizedBox(height: 10),
+                    OrderStatusIndicator(orderStatus: order.orderStatus),
+                    const SizedBox(height: 15),
+                    Text('Товары:',
+                        style:
+                            TextStyle(color: Colors.grey[400], fontSize: 14)),
+                    const SizedBox(height: 5),
+                    if (order.items.isEmpty)
+                      Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 8.0),
+                          child: Text('Нет товаров',
+                              style: TextStyle(color: Colors.grey[500])))
+                    else
+                      Column(
+                        mainAxisSize: MainAxisSize
+                            .min, // Чтобы Column не растягивался бесконечно
+                        children: List.generate(order.items.length, (index) {
+                          final item = order.items[index];
+                          // Добавляем разделитель перед каждым элементом, кроме первого
+                          final divider = index > 0
+                              ? Divider(
+                                  height: 10,
+                                  color: Colors.grey[700],
+                                  thickness: 0.5)
+                              : SizedBox.shrink();
+
+                          return Column(
+                            // Оборачиваем каждый товар и разделитель (если есть) в Column
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              divider, // Показываем разделитель
+                              Padding(
+                                // Отступы для каждого товара
+                                padding:
+                                    const EdgeInsets.symmetric(vertical: 6.0),
+                                child: Row(
+                                  children: [
+                                    // Кликабельная иконка QR
+                                    InkWell(
+                                      onTap: () => showPickupCodeDialog(
+                                          context, item.qrCode, item.article),
+                                      child: Icon(Icons.qr_code_2_rounded,
+                                          color: Colors.grey[400], size: 28),
+                                    ),
+                                    const SizedBox(width: 12),
+                                    Expanded(
+                                      child: Text('Код: ${item.article}',
+                                          style: TextStyle(
+                                              color: Colors.white,
+                                              fontSize: 14)),
+                                    ),
+                                    const SizedBox(width: 12),
+                                    Text('Кол-во: ${item.quantity}',
+                                        style: TextStyle(
+                                            color: Colors.grey[400],
+                                            fontSize: 14)),
+                                  ],
+                                ),
+                              ),
+                            ],
+                          );
+                        }),
+                      ),
+                    const SizedBox(height: 15),
+                    if (canChangeStatus) ...[
+                      Text('Изменить статус:',
+                          style:
+                              TextStyle(color: Colors.grey[400], fontSize: 14)),
+                      const SizedBox(height: 5),
+                      Container(
+                        padding:
+                            EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                        decoration: BoxDecoration(
+                            color: Colors.grey[800],
+                            borderRadius: BorderRadius.circular(8)),
+                        child: DropdownButtonHideUnderline(
+                          child: DropdownButton<String>(
+                            value: selectedStatus,
+                            isExpanded: true,
+                            dropdownColor: Colors.grey[800],
+                            icon: Icon(Icons.arrow_drop_down,
+                                color: Colors.grey[400]),
+                            style: TextStyle(color: Colors.white, fontSize: 14),
+                            items: possibleStatuses
+                                .map((String v) => DropdownMenuItem<String>(
+                                    value: v,
+                                    child: Text(_getStatusDisplayName(v))))
+                                .toList(),
+                            onChanged: (String? n) => n != null
+                                ? stfSetState(() => selectedStatus = n)
+                                : null,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 5),
+                    ] else
+                      Padding(
+                        padding: const EdgeInsets.only(top: 10.0),
+                        child: Text(
+                            'Статус заказа "${_getStatusDisplayName(order.orderStatus)}" нельзя изменить.',
+                            style: TextStyle(
+                                color: Colors.grey[500], fontSize: 13)),
+                      ),
+                  ],
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.of(dialogContext).pop(),
+                  style:
+                      TextButton.styleFrom(foregroundColor: Colors.grey[400]),
+                  child: Text('Отмена'),
+                ),
+                ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                      backgroundColor: primaryColor,
+                      foregroundColor: Colors.white,
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(8))),
+                  onPressed:
+                      (canChangeStatus && selectedStatus != order.orderStatus)
+                          ? () async {
+                              await _updateOrderStatus(order, selectedStatus!);
+                              Navigator.of(dialogContext).pop();
+                            }
+                          : null,
+                  child: Text('Сохранить'),
+                ),
+              ],
+            );
+          },
+        );
       },
     );
   }
-  // --- Конец НОВОГО Диалога ---
+  // --- Конец Диалога Деталей ---
 
-  // --- ОБНОВЛЕНИЕ: Функция _updateOrderStatus теперь принимает customerPhone ---
+// --- Вспомогательный Виджет для Строки Деталей ---
+  Widget _buildDetailRow(IconData icon, String text, BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 5.0),
+      child: Row(
+        children: [
+          Icon(icon, size: 16, color: Colors.grey[500]),
+          const SizedBox(width: 8),
+          Expanded(
+              child: Text(text,
+                  style: TextStyle(color: Colors.grey[300], fontSize: 14))),
+        ],
+      ),
+    );
+  }
+  // --- Конец Вспомогательного Виджета ---
+
+// --- Вспомогательная Функция для Имени Статуса ---
+  String _getStatusDisplayName(String status) {
+    switch (status.toLowerCase()) {
+      case 'pending':
+        return 'В обработке';
+      case 'processing':
+        return 'Обрабатывается';
+      case 'in_transit':
+        return 'В пути';
+      case 'ready_for_pickup':
+        return 'Готов к выдаче';
+      case 'delivered':
+        return 'Выдан';
+      default:
+        return status;
+    }
+  }
+  // --- Конец Вспомогательной Функции ---
+
+  // --- Обновление Статуса Заказа ---
   Future<void> _updateOrderStatus(Order order, String newStatus) async {
-    // Используем _orderIdToPhoneMap для получения телефона
     final customerPhone = _orderIdToPhoneMap[order.id];
     if (customerPhone == null || customerPhone.isEmpty) {
-      print("Error: Could not find customer phone for order ${order.id}");
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Ошибка: Не найден клиент для заказа.')));
-      }
+      _showErrorSnackBar('Ошибка: Не найден клиент для заказа.');
       return;
     }
     final dbRef = FirebaseDatabase.instance.ref();
     final orderStatusPath =
         'users/customers/$customerPhone/orders/${order.id}/order_status';
-    print(
-        "Updating status for order ${order.id} at path $orderStatusPath to $newStatus");
-
-    // Показываем индикатор загрузки
     showDialog(
         context: context,
         barrierDismissible: false,
         builder: (context) => Center(child: CircularProgressIndicator()));
-
     try {
       await dbRef.child(orderStatusPath).set(newStatus);
       Navigator.of(context).pop(); // Убираем индикатор
-
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-            content:
-                Text('Статус заказа "${order.id}" обновлен на "$newStatus"!')));
-        // Перезагружаем все данные, чтобы списки обновились
-        await _loadInitialData();
+            content: Text('Статус заказа обновлен!'),
+            backgroundColor: Colors.green));
+        await _loadInitialData(); // Перезагружаем все данные
       }
     } catch (e) {
-      Navigator.of(context).pop(); // Убираем индикатор при ошибке
+      Navigator.of(context).pop();
       print("Error updating order status: $e");
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Ошибка обновления статуса: $e')));
-      }
+      _showErrorSnackBar('Ошибка обновления статуса: $e');
     }
   }
-  // --- Конец функции обновления статуса ---
+  // --- Конец Функции Обновления Статуса ---
 
   // --- Функция Выхода ---
   Future<void> _signOut() async {
     try {
       await FirebaseAuth.instance.signOut();
-      print("Employee signed out");
       if (mounted) {
         Navigator.of(context).pushAndRemoveUntil(
           MaterialPageRoute(builder: (context) => const LoginScreen()),
@@ -721,255 +684,71 @@ class _EmployeeHomeTabState extends State<EmployeeHomeTab> {
         );
       }
     } catch (e) {
-      print("Error signing out: $e");
-      if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text("Ошибка выхода: $e")));
-      }
+      _showErrorSnackBar("Ошибка выхода: $e");
+    }
+  }
+  // --- Конец Функции Выхода ---
+
+  // --- Вспомогательная функция для показа SnackBar ошибок ---
+  void _showErrorSnackBar(String message) {
+    if (mounted) {
+      ScaffoldMessenger.of(context).removeCurrentSnackBar();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(message), backgroundColor: Colors.redAccent),
+      );
     }
   }
 
-  // --- ОСНОВНОЙ МЕТОД BUILD ---
+// --- ОСНОВНОЙ МЕТОД BUILD ---
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: screenBackgroundColor, // Светлый фон экрана
       appBar: AppBar(
+        // AppBar остается простым, т.к. приветствие и адрес будут в контенте
         title: const Text('Сегодня'),
-        backgroundColor: Colors.deepPurple,
+        backgroundColor: Colors.white, // Белый AppBar
+        foregroundColor: textColorPrimary, // Цвет текста и иконок на AppBar
+        elevation: 1.0, // Небольшая тень
         actions: [
           IconButton(
-            icon: Icon(Icons.logout),
+            icon: Icon(Icons.logout_outlined,
+                color: Colors.red[400]), // Иконка выхода
             tooltip: 'Выйти',
             onPressed: _signOut,
           )
         ],
       ),
       body: RefreshIndicator(
-        onRefresh: _loadInitialData,
+        onRefresh: _loadInitialData, // Обновление по свайпу
+        color: primaryColor, // Цвет индикатора обновления
         child: _isLoading
-            ? const Center(child: CircularProgressIndicator())
+            ? Center(child: CircularProgressIndicator(color: primaryColor))
             : GestureDetector(
+                // Скрытие клавиатуры по тапу вне поля
                 onTap: () => FocusScope.of(context).unfocus(),
                 child: ListView(
+                  // Основной скролл
                   padding: const EdgeInsets.all(16.0),
                   children: [
-                    // --- Приветствие и Адрес ПВЗ ---
-                    Text(
-                      'Добрый день, ${_employee?.name ?? 'Сотрудник'}!',
-                      style: Theme.of(context)
-                          .textTheme
-                          .headlineSmall
-                          ?.copyWith(fontWeight: FontWeight.bold),
-                    ),
-                    if (_pickupPointAddress != null)
-                      Padding(
-                        padding: const EdgeInsets.only(top: 4.0),
-                        child: Text(
-                          'Пункт выдачи на $_pickupPointAddress',
-                          style: Theme.of(context)
-                              .textTheme
-                              .titleMedium
-                              ?.copyWith(color: Colors.grey[700]),
-                        ),
-                      ),
-                    const SizedBox(height: 24),
+                    // 1. Приветствие и Адрес ПВЗ
+                    _buildGreetingSection(),
+                    const SizedBox(height: 20),
 
-                    // --- Секция "Ожидается к выдаче" ---
-                    Text(
-                      'Ожидается к выдаче (${_readyOrdersByCustomer.values.expand((list) => list).length})',
-                      style: Theme.of(context)
-                          .textTheme
-                          .titleLarge
-                          ?.copyWith(color: Colors.deepPurple[700]),
-                    ),
-                    const SizedBox(height: 8),
-                    _readyOrdersByCustomer.isEmpty
-                        ? const Card(
-                            elevation: 1,
-                            shape: RoundedRectangleBorder(
-                                borderRadius:
-                                    BorderRadius.all(Radius.circular(8))),
-                            child: ListTile(
-                                leading: Icon(Icons.check_circle_outline,
-                                    color: Colors.grey),
-                                title: Text('Нет заказов, готовых к выдаче.')))
-                        : ListView.builder(
-                            // Список готовых к выдаче
-                            shrinkWrap: true,
-                            physics: const NeverScrollableScrollPhysics(),
-                            itemCount: _readyOrdersByCustomer.length,
-                            itemBuilder: (context, index) {
-                              final customerPhone =
-                                  _readyOrdersByCustomer.keys.elementAt(index);
-                              final orders =
-                                  _readyOrdersByCustomer[customerPhone]!;
-                              final customerName =
-                                  customerUsernames[customerPhone] ??
-                                      customerPhone;
-                              return Card(
-                                elevation: 2,
-                                shape: RoundedRectangleBorder(
-                                    borderRadius:
-                                        BorderRadius.all(Radius.circular(8))),
-                                margin: const EdgeInsets.only(bottom: 8),
-                                child: ListTile(
-                                  leading: CircleAvatar(
-                                    backgroundColor: Colors.green[100],
-                                    child: Icon(Icons.person_outline,
-                                        color: Colors.green[800]),
-                                  ),
-                                  title: Text(customerName,
-                                      style: TextStyle(
-                                          fontWeight: FontWeight.w500)),
-                                  subtitle:
-                                      Text('Готовых заказов: ${orders.length}'),
-                                  trailing: Icon(Icons.arrow_forward_ios,
-                                      size: 16, color: Colors.grey),
-                                  onTap: () => _showReadyOrderDetailsDialog(
-                                      context, customerPhone, orders),
-                                ),
-                              );
-                            },
-                          ),
-                    const SizedBox(height: 24),
-
-                    // --- Секция "Забронировано на сегодня" ---
-                    Text(
-                      'Забронировано на сегодня (${_todaysBookings.length})',
-                      style: Theme.of(context)
-                          .textTheme
-                          .titleLarge
-                          ?.copyWith(color: Colors.deepPurple[700]),
-                    ),
-                    const SizedBox(height: 8),
-                    _todaysBookings.isEmpty
-                        ? const Card(
-                            elevation: 1,
-                            shape: RoundedRectangleBorder(
-                                borderRadius:
-                                    BorderRadius.all(Radius.circular(8))),
-                            child: ListTile(
-                                leading: Icon(Icons.calendar_today_outlined,
-                                    color: Colors.grey),
-                                title: Text('На сегодня нет бронирований.')))
-                        : ListView.builder(
-                            // Список броней
-                            shrinkWrap: true,
-                            physics: const NeverScrollableScrollPhysics(),
-                            itemCount: _todaysBookings.length,
-                            itemBuilder: (context, index) {
-                              final booking = _todaysBookings[index];
-                              final customerName =
-                                  customerUsernames[booking.userPhone] ??
-                                      booking.userPhone;
-                              return Card(
-                                elevation: 2,
-                                shape: RoundedRectangleBorder(
-                                    borderRadius:
-                                        BorderRadius.all(Radius.circular(8))),
-                                margin: const EdgeInsets.only(bottom: 8),
-                                child: ListTile(
-                                  leading: CircleAvatar(
-                                    backgroundColor: Colors.orange[100],
-                                    child: Icon(
-                                      Icons.watch_later_outlined,
-                                      color: Colors.orange[800],
-                                      size: 20,
-                                    ),
-                                  ),
-                                  title: Text(
-                                      '${booking.timeSlot} - $customerName',
-                                      style: TextStyle(
-                                          fontWeight: FontWeight.w500)),
-                                  subtitle:
-                                      Text('Заказ ID: ${booking.orderId}'),
-                                ),
-                              );
-                            },
-                          ),
-                    const SizedBox(height: 24),
-
-                    // --- НОВЫЙ БЛОК: Поиск Заказа ---
-                    Text(
-                      'Поиск заказа',
-                      style: Theme.of(context)
-                          .textTheme
-                          .titleLarge
-                          ?.copyWith(color: Colors.deepPurple[700]),
-                    ),
-                    const SizedBox(height: 8),
-                    TextField(
-                      controller: _searchController,
-                      decoration: InputDecoration(
-                        hintText: 'ID заказа, Код товара, Телефон/Имя...',
-                        prefixIcon:
-                            Icon(Icons.search, color: Colors.deepPurple),
-                        border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(8)),
-                        filled: true,
-                        fillColor: Colors.white,
-                        contentPadding:
-                            EdgeInsets.symmetric(vertical: 0, horizontal: 12),
-                        suffixIcon: _searchController.text.isNotEmpty
-                            ? IconButton(
-                                icon: Icon(Icons.clear, color: Colors.grey),
-                                onPressed: () => _searchController.clear(),
-                              )
-                            : null,
-                      ),
-                      // onChanged больше не нужен, используем listener
-                    ),
-                    const SizedBox(height: 12),
-
-                    // --- Список найденных заказов ---
-                    if (_searchController.text.isEmpty)
-                      Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 16.0),
-                        child: Center(
-                            child: Text('Введите запрос для поиска заказа.',
-                                style: TextStyle(color: Colors.grey))),
-                      )
-                    else if (_filteredOrders.isEmpty)
-                      Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 16.0),
-                        child: Center(
-                            child: Text(
-                                'Заказы по запросу "${_searchController.text}" не найдены.',
-                                style: TextStyle(color: Colors.grey))),
-                      )
-                    else
-                      ListView.builder(
-                        shrinkWrap: true,
-                        physics: const NeverScrollableScrollPhysics(),
-                        itemCount: _filteredOrders.length,
-                        itemBuilder: (context, index) {
-                          final order = _filteredOrders[index];
-                          final customerPhone =
-                              _orderIdToPhoneMap[order.id] ?? 'Неизвестно';
-                          final customerDisplay =
-                              customerUsernames[customerPhone] ?? customerPhone;
-
-                          return Card(
-                            elevation: 1,
-                            margin: const EdgeInsets.only(bottom: 8),
-                            shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(8)),
-                            child: ListTile(
-                              title: Text(
-                                  "Заказ ${order.id} от ${order.orderDate}",
-                                  style: TextStyle(fontSize: 14)),
-                              subtitle: Text(
-                                  "$customerDisplay | Статус: ${order.orderStatus}",
-                                  style: TextStyle(fontSize: 13)),
-                              trailing: Icon(Icons.chevron_right, size: 20),
-                              onTap: () {
-                                _showOrderDetailsPopup(context, order);
-                              }, // Вызов НОВОГО диалога
-                            ),
-                          );
-                        },
-                      ),
-                    // --- Конец Секции Поиска ---
+                    // 2. Поиск Заказа
+                    _buildSearchSection(),
+                    // Отображение результатов поиска ИЛИ основных секций
+                    if (_searchController.text.isNotEmpty)
+                      _buildSearchResultsSection() // Показываем результаты если есть запрос
+                    else ...[
+                      // Иначе показываем брони и готовые
+                      const SizedBox(height: 24),
+                      // 3. Бронирования на сегодня
+                      _buildBookingsSection(),
+                      const SizedBox(height: 24),
+                      // 4. Готовые к выдаче
+                      _buildReadyOrdersSection(),
+                    ],
                     const SizedBox(height: 20), // Нижний отступ
                   ],
                 ),
@@ -977,5 +756,329 @@ class _EmployeeHomeTabState extends State<EmployeeHomeTab> {
       ),
     );
   }
-// <<<--- ЗДЕСЬ КОНЕЦ КЛАССА _EmployeeHomeTabState ---
-}
+
+  // --- Виджет Приветствия ---
+  Widget _buildGreetingSection() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text('Добрый день, ${_employee?.name ?? 'Сотрудник'}!',
+            style: TextStyle(
+                fontSize: 22,
+                fontWeight: FontWeight.bold,
+                color: textColorPrimary)),
+        if (_pickupPointAddress != null)
+          Padding(
+            padding: const EdgeInsets.only(top: 4.0),
+            child: Row(
+              children: [
+                Icon(Icons.location_on_outlined,
+                    size: 16, color: textColorSecondary),
+                const SizedBox(width: 6),
+                Expanded(
+                    child: Text(_pickupPointAddress!,
+                        style: TextStyle(
+                            fontSize: 14, color: textColorSecondary))),
+              ],
+            ),
+          ),
+      ],
+    );
+  }
+  // --- Конец Виджета Приветствия ---
+
+  // --- Виджет Секции Поиска ---
+  Widget _buildSearchSection() {
+    return TextField(
+      controller: _searchController,
+      decoration: InputDecoration(
+        hintText: 'Поиск по ID, коду, телефону, имени...',
+        prefixIcon: Icon(Icons.search, color: primaryColor.withOpacity(0.8)),
+        filled: true,
+        fillColor: cardBackgroundColor,
+        contentPadding: EdgeInsets.symmetric(vertical: 10, horizontal: 15),
+        border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(12),
+            borderSide: BorderSide(color: Colors.grey[300]!)),
+        enabledBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(12),
+            borderSide: BorderSide(color: Colors.grey[300]!)),
+        focusedBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(12),
+            borderSide: BorderSide(color: primaryColor, width: 1.5)),
+        suffixIcon: _searchController.text.isNotEmpty
+            ? IconButton(
+                icon: Icon(Icons.clear, color: textColorSecondary, size: 20),
+                onPressed: () {
+                  _searchController.clear();
+                  FocusScope.of(context).unfocus();
+                },
+              )
+            : null,
+      ),
+    );
+  }
+  // --- Конец Виджета Поиска ---
+
+  // --- Виджет Отображения Результатов Поиска ---
+  Widget _buildSearchResultsSection() {
+    if (_isLoading) return SizedBox.shrink();
+    if (_filteredOrders.isEmpty)
+      return Padding(
+        padding: const EdgeInsets.only(top: 30.0),
+        child: Center(
+            child: Text('Заказы по запросу не найдены.',
+                style: TextStyle(color: textColorSecondary))),
+      );
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const SizedBox(height: 20),
+        Padding(
+          padding: const EdgeInsets.only(bottom: 10.0),
+          child: Text('Результаты поиска (${_filteredOrders.length}):',
+              style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w600,
+                  color: textColorPrimary)),
+        ),
+        ListView.builder(
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
+          itemCount: _filteredOrders.length,
+          itemBuilder: (context, index) {
+            final order = _filteredOrders[index];
+            final customerPhone = _orderIdToPhoneMap[order.id] ?? 'Неизвестно';
+            final customerDisplay =
+                customerUsernames[customerPhone] ?? customerPhone;
+            return Card(
+              elevation: 1.5,
+              margin: const EdgeInsets.only(bottom: 10),
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(10)),
+              child: ListTile(
+                contentPadding:
+                    EdgeInsets.symmetric(vertical: 8, horizontal: 16),
+                title: Text(
+                    "Заказ #${order.id.split('_').last} от ${order.orderDate}",
+                    style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w500,
+                        color: textColorPrimary)),
+                subtitle: Text(
+                    "$customerDisplay | ${_getStatusDisplayName(order.orderStatus)}",
+                    style: TextStyle(
+                        fontSize: 13,
+                        color:
+                            textColorSecondary)), // <<<--- Используем читаемый статус
+                trailing:
+                    Icon(Icons.chevron_right, size: 20, color: Colors.grey),
+                onTap: () => _showStyledOrderDetailsDialog(
+                    context, order), // <<<--- ИСПРАВЛЕННЫЙ ВЫЗОВ
+              ),
+            );
+          },
+        ),
+      ],
+    );
+  }
+  // --- Конец Виджета Результатов Поиска ---
+
+  // --- Виджет Секции Бронирований ---
+  Widget _buildBookingsSection() {
+    _todaysBookings.sort((a, b) => a.timeSlot.compareTo(b.timeSlot));
+    BookingInfo? nextBooking;
+    final now = TimeOfDay.now();
+    final nowMinutes = now.hour * 60 + now.minute;
+    for (var booking in _todaysBookings) {
+      try {
+        final parts = booking.timeSlot.split(':');
+        final bookingMinutes = int.parse(parts[0]) * 60 + int.parse(parts[1]);
+        if (bookingMinutes >= nowMinutes) {
+          nextBooking = booking;
+          break;
+        }
+      } catch (e) {
+        print("Err parsing booking time: ${booking.timeSlot}");
+      }
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text('Забронировано на сегодня (${_todaysBookings.length})',
+            style: TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.w600,
+                color: textColorPrimary)),
+        const SizedBox(height: 12),
+        if (_todaysBookings.isEmpty)
+          _buildEmptyStateCard(
+              Icons.event_busy_outlined, 'На сегодня нет бронирований.')
+        else
+          ListView.builder(
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            itemCount: _todaysBookings.length,
+            itemBuilder: (context, index) {
+              final booking = _todaysBookings[index];
+              final customerName =
+                  customerUsernames[booking.userPhone] ?? booking.userPhone;
+              final isNext = booking == nextBooking;
+              return Card(
+                elevation: isNext ? 3.0 : 1.5,
+                margin: const EdgeInsets.only(bottom: 10),
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10),
+                    side: BorderSide(
+                        color: isNext ? accentColor : Colors.transparent,
+                        width: isNext ? 1.5 : 0)),
+                child: ListTile(
+                  contentPadding:
+                      EdgeInsets.symmetric(vertical: 10, horizontal: 16),
+                  leading: CircleAvatar(
+                      backgroundColor: (isNext ? accentColor : primaryColor)
+                          .withOpacity(0.1),
+                      child: Icon(Icons.access_time_rounded,
+                          color: isNext ? accentColor : primaryColor,
+                          size: 24)),
+                  title: Text(booking.timeSlot,
+                      style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                          color: isNext ? accentColor : textColorPrimary)),
+                  subtitle: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      SizedBox(height: 3),
+                      Text(customerName,
+                          style:
+                              TextStyle(fontSize: 14, color: textColorPrimary)),
+                      Text(
+                          'Заказ #${booking.orderId.replaceFirst("order_", "")}',
+                          style: TextStyle(
+                              fontSize: 13, color: textColorSecondary)),
+                    ],
+                  ),
+                ),
+              );
+            },
+          ),
+      ],
+    );
+  }
+  // --- Конец Виджета Бронирований --
+
+  // --- Виджет Секции Готовых к Выдаче ---
+  Widget _buildReadyOrdersSection() {
+    final readyOrdersCount =
+        _readyOrdersByCustomer.values.expand((list) => list).length;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text('Готовы к выдаче ($readyOrdersCount)',
+            style: TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.w600,
+                color: textColorPrimary)),
+        const SizedBox(height: 12),
+        if (_readyOrdersByCustomer.isEmpty)
+          _buildEmptyStateCard(
+              Icons.check_circle_outline, 'Нет заказов, готовых к выдаче.')
+        else
+          ListView.builder(
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            itemCount: _readyOrdersByCustomer.length,
+            itemBuilder: (context, index) {
+              final customerPhone =
+                  _readyOrdersByCustomer.keys.elementAt(index);
+              final orders = _readyOrdersByCustomer[customerPhone]!;
+              final customerName =
+                  customerUsernames[customerPhone] ?? customerPhone;
+              return Card(
+                elevation: 1.5,
+                margin: const EdgeInsets.only(bottom: 10),
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10)),
+                child: Padding(
+                  padding:
+                      const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
+                  child: Row(
+                    children: [
+                      CircleAvatar(
+                          backgroundColor: Colors.green.withOpacity(0.1),
+                          child: Icon(Icons.inventory_2_outlined,
+                              color: Colors.green.shade700, size: 24)),
+                      const SizedBox(width: 16),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(customerName,
+                                style: TextStyle(
+                                    fontWeight: FontWeight.w500,
+                                    fontSize: 15,
+                                    color: textColorPrimary)),
+                            Text(customerPhone,
+                                style: TextStyle(
+                                    fontSize: 13, color: textColorSecondary)),
+                            Text('Готово заказов: ${orders.length}',
+                                style: TextStyle(
+                                    fontSize: 13, color: textColorSecondary)),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      ElevatedButton(
+                        onPressed: () => _showReadyOrderDetailsDialog(
+                            context, customerPhone, orders),
+                        style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.green.shade600,
+                            foregroundColor: Colors.white,
+                            padding: EdgeInsets.symmetric(
+                                horizontal: 12, vertical: 8),
+                            textStyle: TextStyle(
+                                fontSize: 13, fontWeight: FontWeight.w500),
+                            shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(8))),
+                        child: Text('Выдать'),
+                      )
+                    ],
+                  ),
+                ),
+              );
+            },
+          ),
+      ],
+    );
+  }
+  // --- Конец Виджета Готовых к Выдаче ---
+
+  // --- Виджет для Отображения Пустого Состояния ---
+  Widget _buildEmptyStateCard(IconData icon, String message) {
+    return Card(
+      elevation: 0.5,
+      color: Colors.grey[100],
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 24.0, horizontal: 16.0),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(icon, color: textColorSecondary, size: 24),
+            const SizedBox(width: 12),
+            Text(message,
+                style: TextStyle(color: textColorSecondary, fontSize: 14)),
+          ],
+        ),
+      ),
+    );
+  }
+  // --- Конец Виджета Пустого Состояния ---
+
+// --- Конец Вспомогательных Функций и Класса _EmployeeHomeTabState ---
+
+/* ... Код EmployeeHomeTab и других связанных классов (если они есть) ... */
+} // <<<--- Убедись, что эта скобка закрывает класс _EmployeeHomeTabState

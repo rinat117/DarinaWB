@@ -1,11 +1,13 @@
+// lib/screens/tabs/chat_tab.dart
+
 import 'dart:async';
-import 'dart:convert'; // Для jsonEncode/jsonDecode
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:firebase_database/firebase_database.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:http/http.dart' as http; // Импорт http
+import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
-import '../../models/chat_message.dart'; // Убедись, что путь верный
+import '../../models/chat_message.dart';
 
 class ChatTab extends StatefulWidget {
   final String pickupPointId;
@@ -25,25 +27,33 @@ class _ChatTabState extends State<ChatTab> {
   final TextEditingController _messageController = TextEditingController();
   final ScrollController _scrollController = ScrollController();
   List<ChatMessage> _messages = [];
-  bool _isLoadingMessages = true; // Загрузка сообщений
-  bool _isLoadingStatus = true; // Загрузка статуса
-  bool _isBotProcessing = false; // Индикатор работы бота
-  String _currentChatStatus = 'bot'; // Текущий статус чата
+  bool _isLoadingMessages = true;
+  bool _isLoadingStatus = true;
+  bool _isBotProcessing = false;
+  String _currentChatStatus = 'bot';
   StreamSubscription? _messagesSubscription;
-  StreamSubscription? _statusSubscription; // Слушатель статуса
+  StreamSubscription? _statusSubscription;
 
   DatabaseReference? _chatRef;
   DatabaseReference? _statusRef;
   bool _isChatRefInitialized = false;
 
-  // --- ВАЖНО: ЗАМЕНИ НА СВОЙ КЛЮЧ И URL! ---
-  // Вставь свой реальный ключ OpenRouter вместо "sk-or-v1-..."
+  // --- API Ключ и URL (Убедись, что они верны!) ---
   final String _openRouterApiKey =
-      "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"; // <<<--- ТВОЙ API КЛЮЧ ЗДЕСЬ! (ПОМНИ О БЕЗОПАСНОСТИ!)
-  final String _yourSiteUrl =
-      "app://com.example.myapp"; // <<<--- Замени на URL/Идентификатор твоего приложения
-  final String _yourSiteName = "Darina WB Helper"; // <<<--- Замени на название
+      "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"; // <<<--- ТВОЙ КЛЮЧ
+  final String _yourSiteUrl = "app://com.example.myapp";
+  final String _yourSiteName = "Darina WB Helper";
   // ---
+
+  // --- Цвета для дизайна ---
+  final Color primaryColor = const Color(0xFF7F00FF); // Основной фиолетовый
+  final Color accentColor = const Color(0xFFCB11AB); // Розовый акцент
+  final Color employeeBubbleColor = Colors.green[50]!; // Для сотрудника
+  final Color botBubbleColor = Colors.blueGrey[50]!; // Для бота
+  final Color systemTextColor = Colors.grey[600]!; // Для системных сообщений
+  final Color inputBackgroundColor = Colors.white;
+  final Color backgroundColor = Colors.grey[50]!; // Фон чата
+  final Color mediumGrey = Colors.grey[600]!;
 
   @override
   void initState() {
@@ -60,6 +70,7 @@ class _ChatTabState extends State<ChatTab> {
     super.dispose();
   }
 
+  // --- (Функции инициализации, слушателей, отправки сообщения, работы с ботом - остаются без изменений) ---
   void _initializeChatRefAndListen() {
     String? userPhone = widget.user.phoneNumber?.replaceAll('+', '');
     if (userPhone != null &&
@@ -80,6 +91,7 @@ class _ChatTabState extends State<ChatTab> {
             _isLoadingMessages = false;
             _isLoadingStatus = false;
           });
+        _showErrorSnackBar("Ошибка инициализации чата.");
       }
     } else {
       print(
@@ -89,6 +101,7 @@ class _ChatTabState extends State<ChatTab> {
           _isLoadingMessages = false;
           _isLoadingStatus = false;
         });
+      _showErrorSnackBar("Не удалось загрузить чат (ошибка данных).");
     }
   }
 
@@ -104,8 +117,11 @@ class _ChatTabState extends State<ChatTab> {
           event.snapshot.value is String) {
         status = event.snapshot.value as String;
       } else {
-        // Если статус не найден в базе, устанавливаем 'bot' по умолчанию
-        _statusRef?.set('bot');
+        // Если статус не найден в базе, устанавливаем 'bot'
+        print(
+            "Chat status node not found for user ${widget.user.phoneNumber}, setting to 'bot'");
+        // Не перезаписываем базу если ноды нет, просто используем 'bot' локально
+        // _statusRef?.set('bot'); // <-- Это может быть нежелательно, если пользователь удален
       }
       setState(() {
         _currentChatStatus = status;
@@ -118,7 +134,8 @@ class _ChatTabState extends State<ChatTab> {
         setState(() {
           _currentChatStatus = 'bot';
           _isLoadingStatus = false;
-        }); // Статус по умолчанию при ошибке
+        });
+      _showErrorSnackBar("Ошибка загрузки статуса чата.");
     });
   }
 
@@ -151,15 +168,15 @@ class _ChatTabState extends State<ChatTab> {
       print("Error listening to messages: $error");
       if (mounted) {
         setState(() => _isLoadingMessages = false);
-        ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text("Ошибка загрузки чата: $error")));
+        _showErrorSnackBar("Ошибка загрузки сообщений.");
       }
     });
   }
 
   Future<void> _sendMessage() async {
     if (!_isChatRefInitialized || _chatRef == null) {
-      /* ... ошибка ... */ return;
+      _showErrorSnackBar("Ошибка отправки: чат не инициализирован.");
+      return;
     }
     final userMessageText = _messageController.text.trim();
     if (userMessageText.isEmpty) return;
@@ -167,10 +184,11 @@ class _ChatTabState extends State<ChatTab> {
     final user = widget.user;
     String? senderId = user.phoneNumber;
     if (senderId == null || senderId.isEmpty) {
-      /* ... ошибка ... */ return;
+      _showErrorSnackBar("Ошибка отправки: не найден номер телефона.");
+      return;
     }
     // Получаем чистый номер телефона для чтения статуса
-    String userPhoneClean = senderId.replaceAll('+', '');
+    // String userPhoneClean = senderId.replaceAll('+', ''); // Не используется здесь
 
     final userMessagePayload = {
       'sender': senderId,
@@ -183,38 +201,33 @@ class _ChatTabState extends State<ChatTab> {
 
     try {
       // 1. Сохраняем сообщение пользователя
-      DatabaseReference newMessageRef =
-          _chatRef!.push(); // Получаем ссылку на новое сообщение
+      DatabaseReference newMessageRef = _chatRef!.push();
       await newMessageRef.set(userMessagePayload);
-      _scrollToBottom(); // Прокручиваем сразу после добавления нашего сообщения
+      _scrollToBottom();
 
       // 2. Проверяем статус чата (используем актуальное значение из state)
       print("Checking status before bot call: $_currentChatStatus");
       if (_currentChatStatus == 'bot') {
-        // 3. Вызываем псевдо-бота
+        // 3. Вызываем бота
         setState(() => _isBotProcessing = true);
         await _getAndSaveBotResponse(userMessageText);
-        // Убираем индикатор бота после его ответа (или ошибки)
-        if (mounted) setState(() => _isBotProcessing = false);
       }
+      // Не нужно else, если отвечает сотрудник, он увидит сообщение и так
     } catch (e) {
       print("Error sending message or triggering bot: $e");
-      if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text("Ошибка отправки: $e")));
-        setState(
-            () => _isBotProcessing = false); // Убираем индикатор при ошибке
-      }
+      _showErrorSnackBar("Ошибка отправки сообщения.");
+    } finally {
+      // Убираем индикатор бота только если он запускался
+      if (mounted && _isBotProcessing) setState(() => _isBotProcessing = false);
     }
   }
 
   Future<void> _getAndSaveBotResponse(String userMessage) async {
-    // Проверка ключа (лучше вынести в переменные окружения, но для демо...)
     if (_openRouterApiKey.startsWith("sk-or-v1-...") ||
         _openRouterApiKey.isEmpty) {
       print("OpenRouter API Key is missing or invalid!");
       await _saveBotMessage(
-          "Извините, я сейчас не доступен (API Key не настроен)."); // Используем await
+          "Извините, помощник временно недоступен (API Key).");
       return;
     }
 
@@ -229,66 +242,55 @@ class _ChatTabState extends State<ChatTab> {
           .post(
             Uri.parse(url),
             headers: {
+              /* ... headers ... */
               'Authorization': 'Bearer $_openRouterApiKey',
               'Content-Type': 'application/json',
               'HTTP-Referer': _yourSiteUrl,
               'X-Title': _yourSiteName,
             },
             body: jsonEncode({
-              "model":
-                  "deepseek/deepseek-chat-v3-0324:free", // Используем бесплатную модель
+              "model": "deepseek/deepseek-chat-v3-0324:free",
               "messages": [
                 {"role": "system", "content": systemPrompt},
                 {"role": "user", "content": userMessage}
               ]
             }),
           )
-          .timeout(const Duration(seconds: 30)); // Таймаут 30 секунд
+          .timeout(const Duration(seconds: 30));
 
       if (!mounted) return;
 
       if (response.statusCode == 200) {
-        final responseBody =
-            jsonDecode(utf8.decode(response.bodyBytes)); // Декодируем UTF-8
+        final responseBody = jsonDecode(utf8.decode(response.bodyBytes));
         if (responseBody['choices'] != null &&
             responseBody['choices'].isNotEmpty) {
           final botMessage =
               responseBody['choices'][0]['message']['content']?.trim();
-          if (botMessage != null && botMessage.isNotEmpty) {
-            print("Bot response received: $botMessage");
-            await _saveBotMessage(botMessage); // Ждем сохранения
-          } else {
-            print("Bot response was empty.");
-            await _saveBotMessage("..."); // Ответ-заглушка
-          }
+          await _saveBotMessage(botMessage ?? "...");
         } else {
           print("Invalid response structure from OpenRouter: ${response.body}");
-          await _saveBotMessage("Не удалось получить ответ.");
+          await _saveBotMessage("Не удалось получить ответ от помощника.");
         }
       } else {
         print(
             "Error calling OpenRouter API: ${response.statusCode} ${response.body}");
         await _saveBotMessage(
-            "Извините, помощник временно недоступен (${response.statusCode}).");
+            "Помощник временно недоступен (${response.statusCode}).");
       }
     } catch (e) {
       print("Exception calling OpenRouter API: $e");
-      if (mounted) {
-        await _saveBotMessage("Извините, не удалось связаться с помощником.");
-      }
+      await _saveBotMessage("Ошибка соединения с помощником.");
     }
   }
 
   Future<void> _saveBotMessage(String messageText) async {
     if (!_isChatRefInitialized || _chatRef == null) return;
-
     final botMessagePayload = {
       'sender': 'bot',
       'sender_type': 'bot',
       'message': messageText,
       'timestamp': DateTime.now().millisecondsSinceEpoch,
     };
-
     try {
       await _chatRef!.push().set(botMessagePayload);
       _scrollToBottom();
@@ -297,45 +299,42 @@ class _ChatTabState extends State<ChatTab> {
     }
   }
 
-  // --- Функция для запроса помощи сотрудника ---
   Future<void> _requestEmployeeHelp() async {
-    if (!_isChatRefInitialized || _statusRef == null) return;
-
-    final userPhone = widget.user.phoneNumber?.replaceAll('+', '') ?? '';
-    // <<<--- ИСПРАВЛЕНИЕ ЗДЕСЬ ---
-    // Вместо несуществующей _username, берем номер телефона из widget.user
-    final customerDisplay = widget.user.phoneNumber ??
-        'Клиент'; // Берем полный номер или просто "Клиент"
-    // <<<--- КОНЕЦ ИСПРАВЛЕНИЯ ---
-
+    if (!_isChatRefInitialized || _statusRef == null || _chatRef == null) {
+      _showErrorSnackBar("Не удалось запросить помощь (ошибка инициализации).");
+      return;
+    }
+    final userPhone = widget.user.phoneNumber ?? 'Клиент';
     final systemMessage = {
       'sender': 'system',
       'sender_type': 'system',
-      // Теперь используем customerDisplay, который точно определен
-      'message': '$customerDisplay запросил помощь сотрудника.',
+      'message': '$userPhone запросил помощь сотрудника.',
       'timestamp': DateTime.now().millisecondsSinceEpoch,
     };
-
-    // Остальная логика функции остается без изменений
     try {
-      await _statusRef!.set('waiting');
-      await _chatRef!.push().set(systemMessage);
+      // Используем multi-location update для атомарности
+      Map<String, dynamic> updates = {};
+      updates[_statusRef!.path] = 'waiting'; // Обновляем статус
+      updates[_chatRef!.push().path] = systemMessage; // Добавляем сообщение
+
+      await FirebaseDatabase.instance.ref().update(updates);
+
       if (mounted) {
+        // Показываем временное сообщение
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-              content: Text('Запрос отправлен. Сотрудник скоро подключится.')),
+              content: Text('Запрос отправлен. Сотрудник скоро подключится.'),
+              duration: Duration(seconds: 2)),
         );
       }
     } catch (e) {
       print("Error requesting employee help: $e");
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text("Не удалось запросить помощь: $e")));
-      }
+      _showErrorSnackBar("Не удалось запросить помощь.");
     }
   }
 
   void _scrollToBottom() {
+    // ... (код скролла остается) ...
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (_scrollController.hasClients) {
         _scrollController.animateTo(
@@ -347,92 +346,137 @@ class _ChatTabState extends State<ChatTab> {
     });
   }
 
-  @override
-  Widget build(BuildContext context) {
-    bool stillLoading =
-        _isLoadingMessages || _isLoadingStatus; // Общий флаг загрузки
+  // --- Вспомогательная функция для показа SnackBar ошибок ---
+  void _showErrorSnackBar(String message) {
+    if (mounted) {
+      ScaffoldMessenger.of(context)
+          .removeCurrentSnackBar(); // Убираем предыдущий, если есть
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+            content: Text(message),
+            backgroundColor: Colors.redAccent,
+            duration: Duration(seconds: 3)),
+      );
+    }
+  }
+  // --- Конец функций ---
 
-    if (!_isChatRefInitialized) {
-      return Scaffold(
-        appBar: AppBar(
-          title: const Text('Чат'),
-          backgroundColor: Colors.deepPurple,
-        ),
-        body: Center(
-            child: Text(
-                "Не удалось загрузить чат.\nПроверьте свой номер телефона.",
-                textAlign: TextAlign.center)),
+  // --- НОВЫЙ Виджет для отображения статуса/кнопки ---
+  Widget _buildStatusArea() {
+    if (_isLoadingStatus) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(vertical: 8.0),
+        child: Center(
+            child: SizedBox(
+                height: 15,
+                width: 15,
+                child: CircularProgressIndicator(
+                    strokeWidth: 2, color: primaryColor))),
       );
     }
 
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Чат с пунктом выдачи'),
-        backgroundColor: Colors.deepPurple,
-      ),
-      body: Column(
-        children: [
-          // --- Индикатор статуса чата и кнопка вызова сотрудника ---
-          // Показываем только если статус уже загружен
-          if (!_isLoadingStatus) ...[
-            if (_currentChatStatus != 'bot')
-              Container(
-                padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                color: _currentChatStatus == 'waiting'
-                    ? Colors.orange[100]
-                    : Colors.green[100],
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Icon(
-                      _currentChatStatus == 'waiting'
-                          ? Icons.support_agent_outlined
-                          : Icons.check_circle_outline,
-                      size: 18,
-                      color: _currentChatStatus == 'waiting'
-                          ? Colors.orange[800]
-                          : Colors.green[800],
-                    ),
-                    SizedBox(width: 8),
-                    Text(
-                      _currentChatStatus == 'waiting'
-                          ? 'Ожидание сотрудника...'
-                          : 'Вам отвечает сотрудник',
-                      style: TextStyle(
-                        fontWeight: FontWeight.w500,
-                        color: _currentChatStatus == 'waiting'
-                            ? Colors.orange[800]
-                            : Colors.green[800],
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            if (_currentChatStatus == 'bot')
-              Padding(
-                padding: const EdgeInsets.symmetric(
-                    vertical: 0.0), // Убрали верт отступ
-                child: TextButton.icon(
-                  style: TextButton.styleFrom(
-                    visualDensity: VisualDensity.compact, // Компактнее кнопка
-                  ),
-                  icon: Icon(Icons.support_agent, size: 20),
-                  label: Text('Связаться с сотрудником'),
-                  onPressed: _requestEmployeeHelp,
-                ),
-              ),
-            Divider(height: 1), // Разделитель
-          ],
-          // --- Конец индикатора/кнопки ---
+    Widget content;
+    Color backgroundColor = Colors.transparent;
+    bool showDivider = true;
 
+    if (_currentChatStatus == 'bot') {
+      content = TextButton.icon(
+        style: TextButton.styleFrom(
+            foregroundColor: primaryColor, // Цвет текста и иконки
+            padding: EdgeInsets.symmetric(
+                horizontal: 16, vertical: 8), // Умеренные отступы
+            visualDensity: VisualDensity.compact,
+            shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(20)) // Скругление
+            ),
+        icon: Icon(Icons.support_agent_outlined, size: 20),
+        label: Text('Связаться с сотрудником'),
+        onPressed: _isBotProcessing
+            ? null
+            : _requestEmployeeHelp, // Блокируем во время обработки ботом
+      );
+      showDivider = false; // Не нужен разделитель для кнопки
+    } else {
+      IconData statusIcon;
+      String statusText;
+      Color statusColor;
+
+      if (_currentChatStatus == 'waiting') {
+        statusIcon = Icons.support_agent; // Иконка сотрудника
+        statusText = 'Ожидание сотрудника...';
+        statusColor = Colors.orange.shade700;
+        backgroundColor = Colors.orange.shade50;
+      } else {
+        // 'employee'
+        statusIcon = Icons.check_circle; // Иконка галочки
+        statusText = 'Вам отвечает сотрудник';
+        statusColor = Colors.green.shade700;
+        backgroundColor = Colors.green.shade50;
+      }
+      content = Padding(
+        // Добавляем отступы для статуса
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(statusIcon, size: 18, color: statusColor),
+            SizedBox(width: 8),
+            Text(
+              statusText,
+              style: TextStyle(fontWeight: FontWeight.w500, color: statusColor),
+            ),
+          ],
+        ),
+      );
+    }
+
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        AnimatedContainer(
+          // Анимация появления/смены фона
+          duration: Duration(milliseconds: 300),
+          color: backgroundColor,
+          width: double.infinity, // На всю ширину
+          child: Center(child: content),
+        ),
+        if (showDivider) // Показываем разделитель только под статусом
+          Divider(height: 1, thickness: 1, color: Colors.grey[200]),
+      ],
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    // Убираем Scaffold и AppBar отсюда
+    return Container(
+      // Обертка для фона
+      color: backgroundColor,
+      child: Column(
+        children: [
+          // --- Область статуса / кнопки вызова ---
+          _buildStatusArea(),
+
+          // --- Список сообщений ---
           Expanded(
-            child: stillLoading // Используем общий флаг
-                ? Center(child: CircularProgressIndicator())
+            child: (_isLoadingMessages && _messages.isEmpty)
+                ? Center(child: CircularProgressIndicator(color: primaryColor))
                 : _messages.isEmpty
-                    ? Center(child: Text("Нет сообщений. Начните диалог!"))
+                    ? Center(
+                        child: Padding(
+                        padding: const EdgeInsets.all(30.0),
+                        child: Text(
+                            "Нет сообщений.\nЗадайте свой вопрос боту или сотруднику.",
+                            textAlign: TextAlign.center,
+                            style: TextStyle(
+                                fontSize: 16,
+                                color: Colors.grey[600]!) // <<<--- ИЗМЕНЕНИЕ
+                            ),
+                      ))
                     : ListView.builder(
                         controller: _scrollController,
-                        padding: EdgeInsets.all(8.0),
+                        padding: EdgeInsets.symmetric(
+                            vertical: 10.0, horizontal: 10.0),
                         itemCount: _messages.length,
                         itemBuilder: (context, index) {
                           final message = _messages[index];
@@ -441,7 +485,8 @@ class _ChatTabState extends State<ChatTab> {
                         },
                       ),
           ),
-          // --- Индикатор "Бот думает..." ---
+
+          // --- Индикатор "Бот печатает..." ---
           if (_isBotProcessing)
             Padding(
               padding: const EdgeInsets.symmetric(vertical: 8.0),
@@ -451,54 +496,111 @@ class _ChatTabState extends State<ChatTab> {
                   SizedBox(
                       height: 15,
                       width: 15,
-                      child: CircularProgressIndicator(strokeWidth: 2)),
+                      child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: Colors.grey[600]!)), // <<<--- ИЗМЕНЕНИЕ
                   SizedBox(width: 10),
-                  Text("Бот печатает...", style: TextStyle(color: Colors.grey)),
+                  Text("Бот печатает...",
+                      style: TextStyle(
+                          color: Colors.grey[600]!,
+                          fontStyle: FontStyle.italic)), // <<<--- ИЗМЕНЕНИЕ
                 ],
               ),
             ),
           // --- Конец индикатора ---
 
-          // Поле ввода
+          // --- Поле ввода ---
           Container(
-            decoration:
-                BoxDecoration(color: Theme.of(context).cardColor, boxShadow: [
-              BoxShadow(
-                offset: Offset(0, -1),
-                blurRadius: 4,
-                color: Colors.black.withOpacity(0.1),
-              )
-            ]),
             padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 8.0)
                 .copyWith(
-                    bottom: MediaQuery.of(context).padding.bottom / 2 + 8),
+                    bottom: MediaQuery.of(context).padding.bottom / 2 +
+                        8), // Учет нижнего безопасного отступа
+            decoration: BoxDecoration(
+              color: inputBackgroundColor,
+              boxShadow: [
+                BoxShadow(
+                  offset: Offset(0, -2),
+                  blurRadius: 6,
+                  color: Colors.black.withOpacity(0.05), // Легкая тень сверху
+                )
+              ],
+              // Убираем границу контейнера, стиль задает TextField
+            ),
             child: Row(
+              crossAxisAlignment:
+                  CrossAxisAlignment.end, // Выравнивание по нижнему краю
               children: [
                 Expanded(
                   child: TextField(
                     controller: _messageController,
-                    decoration: InputDecoration(
-                      hintText: 'Введите сообщение...',
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(20),
-                        borderSide: BorderSide.none,
-                      ),
-                      filled: true,
-                      fillColor: Colors.grey[200],
-                      contentPadding:
-                          EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                    ),
                     textCapitalization: TextCapitalization.sentences,
                     minLines: 1, maxLines: 5,
-                    enabled:
-                        !_isBotProcessing, // Блокируем ввод, пока бот думает
+                    decoration: InputDecoration(
+                      hintText: 'Введите сообщение...',
+                      hintStyle: TextStyle(color: Colors.grey[500]),
+                      border: OutlineInputBorder(
+                        // Закругленная рамка
+                        borderRadius: BorderRadius.circular(24),
+                        borderSide: BorderSide(color: Colors.grey[300]!),
+                      ),
+                      enabledBorder: OutlineInputBorder(
+                        // Рамка в обычном состоянии
+                        borderRadius: BorderRadius.circular(24),
+                        borderSide: BorderSide(color: Colors.grey[300]!),
+                      ),
+                      focusedBorder: OutlineInputBorder(
+                        // Рамка при фокусе
+                        borderRadius: BorderRadius.circular(24),
+                        borderSide: BorderSide(
+                            color: primaryColor,
+                            width: 1.5), // Яркая при фокусе
+                      ),
+                      filled: true,
+                      fillColor: Colors.white, // Белый фон поля
+                      contentPadding: EdgeInsets.symmetric(
+                          horizontal: 16, vertical: 10), // Внутренние отступы
+                    ),
+                    enabled: !_isLoadingStatus &&
+                        !_isBotProcessing, // Блокируем ввод во время загрузки статуса или работы бота
+                    onSubmitted: (_) =>
+                        _sendMessage(), // Отправка по Enter на клавиатуре
                   ),
                 ),
                 SizedBox(width: 8),
-                IconButton(
-                  icon: const Icon(Icons.send, color: Colors.deepPurple),
-                  // Блокируем отправку, пока бот думает
-                  onPressed: _isBotProcessing ? null : _sendMessage,
+                // Кнопка отправки
+                InkWell(
+                  // Используем InkWell для круглого эффекта нажатия
+                  onTap: (_isLoadingStatus ||
+                          _isBotProcessing ||
+                          _messageController.text.trim().isEmpty)
+                      ? null
+                      : _sendMessage,
+                  borderRadius: BorderRadius.circular(24),
+                  child: Container(
+                    padding: EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      // Градиент кнопки, если активна
+                      gradient: (_isLoadingStatus ||
+                              _isBotProcessing ||
+                              _messageController.text.trim().isEmpty)
+                          ? null // Без градиента если неактивна
+                          : LinearGradient(
+                              colors: [accentColor, primaryColor],
+                              begin: Alignment.bottomLeft,
+                              end: Alignment.topRight),
+                      color: (_isLoadingStatus ||
+                              _isBotProcessing ||
+                              _messageController.text.trim().isEmpty)
+                          ? Colors.grey[300] // Серый если неактивна
+                          : null, // null если градиент
+                      shape: BoxShape.circle,
+                    ),
+                    child: Icon(
+                      Icons.send_rounded,
+                      color: Colors.white, // Иконка всегда белая
+                      size: 24,
+                    ),
+                  ),
                 ),
               ],
             ),
@@ -508,36 +610,63 @@ class _ChatTabState extends State<ChatTab> {
     );
   }
 
+  // --- НОВЫЙ Виджет для пузыря сообщения ---
   Widget _buildMessageBubble(ChatMessage message, bool isMe) {
-    final alignment = isMe ? CrossAxisAlignment.end : CrossAxisAlignment.start;
-    final bubbleAlignment =
-        isMe ? MainAxisAlignment.end : MainAxisAlignment.start;
-    Color bubbleColor;
-    Color textColor;
-    // Определяем цвета в зависимости от типа отправителя
+    // Определяем стили в зависимости от отправителя
+    final Alignment bubbleAlignment =
+        isMe ? Alignment.centerRight : Alignment.centerLeft;
+    final Color bubbleColor;
+    final Color textColor;
+    final BorderRadius borderRadius;
+    final Gradient? bubbleGradient; // Для градиента у клиента
+
     switch (message.senderType) {
       case 'customer':
-        bubbleColor = Colors.deepPurple[400]!;
+        bubbleColor = Colors.white; // Цвет текста будет белым
         textColor = Colors.white;
+        bubbleGradient = LinearGradient(
+            colors: [accentColor, primaryColor],
+            begin: Alignment.bottomLeft,
+            end: Alignment.topRight);
+        borderRadius = BorderRadius.only(
+          topLeft: Radius.circular(20),
+          bottomLeft: Radius.circular(20),
+          topRight: Radius.circular(20),
+          bottomRight: Radius.circular(4), // "Хвостик" справа
+        );
         break;
       case 'employee':
-        bubbleColor = Colors.green[300]!;
+        bubbleColor = employeeBubbleColor;
         textColor = Colors.black87;
+        bubbleGradient = null;
+        borderRadius = BorderRadius.only(
+          topLeft: Radius.circular(4), // "Хвостик" слева
+          bottomLeft: Radius.circular(20),
+          topRight: Radius.circular(20),
+          bottomRight: Radius.circular(20),
+        );
         break;
       case 'bot':
-        bubbleColor = Colors.blueGrey[100]!;
+        bubbleColor = botBubbleColor;
         textColor = Colors.black87;
+        bubbleGradient = null;
+        borderRadius = BorderRadius.only(
+          topLeft: Radius.circular(4), // "Хвостик" слева
+          bottomLeft: Radius.circular(20),
+          topRight: Radius.circular(20),
+          bottomRight: Radius.circular(20),
+        );
         break;
       case 'system':
-        // Системные сообщения отображаем по центру
+        // Системные сообщения рендерим отдельно
         return Container(
-          padding: EdgeInsets.symmetric(vertical: 8.0, horizontal: 16.0),
+          padding: EdgeInsets.symmetric(vertical: 10.0, horizontal: 20.0),
           alignment: Alignment.center,
           child: Text(
             message.message,
             textAlign: TextAlign.center,
             style: TextStyle(
-                color: Colors.grey[600],
+                color: systemTextColor,
                 fontStyle: FontStyle.italic,
                 fontSize: 12),
           ),
@@ -545,49 +674,63 @@ class _ChatTabState extends State<ChatTab> {
       default: // Неизвестный тип
         bubbleColor = Colors.grey[300]!;
         textColor = Colors.black87;
+        bubbleGradient = null;
+        borderRadius = BorderRadius.circular(20);
     }
 
-    final borderRadius = BorderRadius.only(
-      topLeft: Radius.circular(16),
-      topRight: Radius.circular(16),
-      bottomLeft: isMe ? Radius.circular(16) : Radius.circular(0),
-      bottomRight: isMe ? Radius.circular(0) : Radius.circular(16),
-    );
-
-    return Container(
-      margin: const EdgeInsets.symmetric(vertical: 4.0),
-      child: Row(
-        mainAxisAlignment: bubbleAlignment,
-        crossAxisAlignment: CrossAxisAlignment.end,
-        children: [
-          // Сообщение
-          Flexible(
-            child: Container(
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 14.0, vertical: 10.0),
-              decoration: BoxDecoration(
-                color: bubbleColor,
-                borderRadius: borderRadius,
-              ),
-              constraints: BoxConstraints(
-                  maxWidth: MediaQuery.of(context).size.width * 0.75),
+    return Align(
+      // Выравниваем весь блок сообщения
+      alignment: bubbleAlignment,
+      child: Container(
+        margin: const EdgeInsets.symmetric(
+            vertical: 4.0,
+            horizontal: 0), // Убираем гориз. отступ, оставляем верт.
+        padding: const EdgeInsets.symmetric(horizontal: 14.0, vertical: 10.0),
+        constraints: BoxConstraints(
+            maxWidth:
+                MediaQuery.of(context).size.width * 0.75), // Ограничение ширины
+        decoration: BoxDecoration(
+            color: bubbleGradient == null
+                ? bubbleColor
+                : null, // Цвет если нет градиента
+            gradient: bubbleGradient, // Градиент для клиента
+            borderRadius: borderRadius,
+            boxShadow: [
+              // Легкая тень для объема
+              BoxShadow(
+                color: Colors.black.withOpacity(0.05),
+                blurRadius: 5,
+                offset: Offset(1, 1),
+              )
+            ]),
+        child: Column(
+          // Используем Column для текста и времени
+          crossAxisAlignment: CrossAxisAlignment
+              .start, // Текст выравниваем по левому краю пузыря
+          mainAxisSize: MainAxisSize.min, // Занимать минимум места
+          children: [
+            Text(
+              message.message,
+              style: TextStyle(
+                  color: textColor,
+                  fontSize: 15,
+                  height: 1.3), // Немного увеличиваем межстрочный интервал
+            ),
+            SizedBox(height: 4),
+            Align(
+              // Время выравниваем по правому краю пузыря
+              alignment: Alignment.centerRight,
               child: Text(
-                message.message,
-                style: TextStyle(color: textColor, fontSize: 15),
+                DateFormat('HH:mm').format(
+                    DateTime.fromMillisecondsSinceEpoch(message.timestamp)),
+                style: TextStyle(
+                    color:
+                        isMe ? Colors.white70 : systemTextColor, // Цвет времени
+                    fontSize: 10),
               ),
             ),
-          ),
-          SizedBox(width: 6),
-          // Время
-          Padding(
-            padding: const EdgeInsets.only(bottom: 2.0),
-            child: Text(
-              DateFormat('HH:mm').format(
-                  DateTime.fromMillisecondsSinceEpoch(message.timestamp)),
-              style: TextStyle(color: Colors.grey[600], fontSize: 10),
-            ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }

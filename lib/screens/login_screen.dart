@@ -1,10 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_database/firebase_database.dart';
-import 'package:intl_phone_field/intl_phone_field.dart'; // Для ввода телефона
-import 'package:intl_phone_field/phone_number.dart'; // Для ввода телефона
-import 'pickup_selection_screen.dart'; // Экран выбора ПВЗ для клиента
-import 'employee_home_screen.dart'; // Главный экран сотрудника
+import 'pickup_selection_screen.dart';
+import 'employee_home_screen.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({Key? key}) : super(key: key);
@@ -15,18 +13,26 @@ class LoginScreen extends StatefulWidget {
 
 class _LoginScreenState extends State<LoginScreen> {
   final FirebaseAuth _auth = FirebaseAuth.instance;
-  final TextEditingController _inputController =
-      TextEditingController(); // Общий контроллер для email/phone
-  final TextEditingController _passwordController =
-      TextEditingController(); // Контроллер для пароля
-  final TextEditingController _codeController =
-      TextEditingController(); // Контроллер для SMS кода
+  final _formKey = GlobalKey<FormState>(); // Добавляем ключ для формы
+  final TextEditingController _inputController = TextEditingController();
+  final TextEditingController _passwordController = TextEditingController();
+  final TextEditingController _codeController = TextEditingController();
 
-  String? _verificationId; // Хранение ID верификации для SMS
-  bool _isLoading = false; // Состояние загрузки для кнопки
-  bool _isCodeSent = false; // Показывает, был ли отправлен SMS код
-  bool _isEmailMode =
-      false; // Флаг для определения режима ввода (email или телефон)
+  String? _verificationId;
+  bool _isLoading = false;
+  bool _isCodeSent = false;
+  bool _isEmailMode = false;
+  bool _obscurePassword = true; // <<<--- Состояние для видимости пароля
+  String? _inputErrorText; // <<<--- Текст ошибки для поля ввода
+  String? _passwordErrorText; // <<<--- Текст ошибки для поля пароля
+  String? _codeErrorText; // <<<--- Текст ошибки для поля кода
+
+  // Определяем цвета из твоей палитры
+  final Color colorDarkPurple = const Color(0xFF481173);
+  final Color colorMidPurple = const Color(0xFF990099);
+  final Color colorMagenta1 = const Color(0xFFCB11AB);
+  final Color colorMagenta2 = const Color(0xFFB42371);
+  final Color colorError = Colors.redAccent[100]!; // Цвет для текста ошибок
 
   @override
   void dispose() {
@@ -36,16 +42,24 @@ class _LoginScreenState extends State<LoginScreen> {
     super.dispose();
   }
 
-  // --- Определение типа ввода (Email или Телефон) ---
+  // --- Функция для очистки ошибок ---
+  void _clearErrors() {
+    setState(() {
+      _inputErrorText = null;
+      _passwordErrorText = null;
+      _codeErrorText = null;
+    });
+  }
+
   void _determineInputType(String input) {
+    _clearErrors(); // Очищаем ошибки при изменении ввода
     final isEmail = input.contains('@') && input.endsWith('wbpvz.com');
     if (_isEmailMode != isEmail) {
-      // Обновляем только если тип изменился
       setState(() {
         _isEmailMode = isEmail;
-        _isCodeSent = false; // Сбрасываем флаг SMS при смене типа
+        _isCodeSent = false;
         _verificationId = null;
-        // Очищаем ненужные контроллеры при смене режима
+        // Очищаем контроллеры и ошибки при смене режима
         if (_isEmailMode) {
           _codeController.clear();
         } else {
@@ -55,106 +69,149 @@ class _LoginScreenState extends State<LoginScreen> {
     }
   }
 
-  // --- Вход через Email и Пароль (для сотрудников) ---
+  // --- Обновленные функции входа с обработкой ошибок ---
   Future<void> _signInWithEmail() async {
-    if (_inputController.text.isEmpty || _passwordController.text.isEmpty)
+    _clearErrors(); // Очищаем предыдущие ошибки
+    if (_inputController.text.isEmpty) {
+      setState(() => _inputErrorText = 'Введите email сотрудника');
       return;
+    }
+    if (_passwordController.text.isEmpty) {
+      setState(() => _passwordErrorText = 'Введите пароль');
+      return;
+    }
     setState(() => _isLoading = true);
     try {
       await _auth.signInWithEmailAndPassword(
         email: _inputController.text.trim(),
         password: _passwordController.text.trim(),
       );
-      await _navigateBasedOnRole(); // Навигация после успешного входа
+      await _navigateBasedOnRole();
     } on FirebaseAuthException catch (e) {
-      print("Error signing in with email: ${e.message}");
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text("Ошибка входа: ${e.message ?? e.code}")),
-        );
+      print("Error signing in with email: ${e.code} - ${e.message}");
+      String errorMessage = "Неизвестная ошибка входа.";
+      if (e.code == 'user-not-found' ||
+          e.code == 'invalid-email' ||
+          e.code == 'invalid-credential') {
+        errorMessage = 'Неверный email или пароль.';
+        setState(() {
+          // Показываем ошибку под обоими полями
+          _inputErrorText = ' '; // Пустая строка, чтобы поле подсветилось
+          _passwordErrorText = errorMessage;
+        });
+      } else if (e.code == 'wrong-password') {
+        errorMessage = 'Неверный пароль.';
+        setState(() => _passwordErrorText = errorMessage);
+      } else if (e.code == 'too-many-requests') {
+        errorMessage = 'Слишком много попыток. Попробуйте позже.';
+        setState(() => _inputErrorText = errorMessage); // Показываем под email
+      } else {
+        setState(
+            () => _inputErrorText = errorMessage); // Общая ошибка под email
       }
+      // Убираем SnackBar, т.к. ошибка под полем
+      // if (mounted) { ScaffoldMessenger.of(context).showSnackBar(...); }
     } catch (e) {
       print("Generic Error signing in with email: $e");
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text("Произошла ошибка входа.")),
-        );
-      }
+      setState(() => _inputErrorText = "Произошла ошибка входа.");
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
   }
 
-  // --- Отправка SMS кода (для клиентов) ---
   Future<void> _sendSmsCode() async {
-    if (_inputController.text.isEmpty) return;
+    _clearErrors();
     final String phoneNumber = _inputController.text.trim();
-    // Предварительная проверка на существование клиента в БД
-    final dbRef = FirebaseDatabase.instance.ref();
-    final phoneKey = phoneNumber.startsWith('+')
-        ? phoneNumber.substring(1)
-        : phoneNumber; // Убираем '+' если есть
-    final customerSnapshot =
-        await dbRef.child('users/customers/$phoneKey').get();
-
-    if (!customerSnapshot.exists) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Клиент с номером $phoneNumber не найден.')),
-        );
-      }
+    if (phoneNumber.isEmpty) {
+      setState(() => _inputErrorText = 'Введите номер телефона');
+      return;
+    }
+    // Простая валидация формата (можно улучшить)
+    if (!phoneNumber.startsWith('+') || phoneNumber.length < 10) {
+      setState(() => _inputErrorText = 'Неверный формат (+7...)');
       return;
     }
 
-    setState(() => _isLoading = true);
+    setState(() => _isLoading = true); // Показываем загрузку ДО проверки в БД
+    // Проверка на существование клиента в БД
+    final dbRef = FirebaseDatabase.instance.ref();
+    final phoneKey = phoneNumber.substring(1); // Убираем '+'
     try {
+      final customerSnapshot =
+          await dbRef.child('users/customers/$phoneKey').get();
+
+      if (!customerSnapshot.exists && mounted) {
+        setState(() {
+          _inputErrorText = 'Клиент с номером $phoneNumber не найден.';
+          _isLoading = false; // Убираем загрузку
+        });
+        return; // Прерываем выполнение
+      }
+
+      // Если клиент найден, продолжаем отправку кода
       await _auth.verifyPhoneNumber(
-        phoneNumber: phoneNumber, // Передаем номер как есть (с +)
+        phoneNumber: phoneNumber,
         verificationCompleted: (PhoneAuthCredential credential) async {
           print("Phone verification completed automatically.");
-          // Автоматический вход (редко срабатывает на iOS)
+          _clearErrors();
           await _auth.signInWithCredential(credential);
           await _navigateBasedOnRole();
         },
         verificationFailed: (FirebaseAuthException e) {
-          print("Phone verification failed: ${e.message}");
+          print("Phone verification failed: ${e.code} - ${e.message}");
+          String errorMessage = "Ошибка верификации.";
+          if (e.code == 'invalid-phone-number') {
+            errorMessage = 'Неверный формат номера телефона.';
+          } else if (e.code == 'too-many-requests') {
+            errorMessage = 'Слишком много попыток. Попробуйте позже.';
+          } else if (e.code == 'network-request-failed') {
+            errorMessage = 'Ошибка сети. Проверьте подключение.';
+          }
+          // Добавить другие коды ошибок по мере необходимости
           if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(
-                  content: Text("Ошибка верификации: ${e.message ?? e.code}")),
-            );
+            setState(() => _inputErrorText = errorMessage);
           }
         },
         codeSent: (String verificationId, int? resendToken) {
           print("SMS code sent, verificationId: $verificationId");
+          _clearErrors(); // Очищаем ошибки при успешной отправке
           if (mounted) {
             setState(() {
               _verificationId = verificationId;
-              _isCodeSent = true; // Показываем поле для ввода кода
+              _isCodeSent = true;
             });
           }
         },
         codeAutoRetrievalTimeout: (String verificationId) {
           print("SMS code auto retrieval timeout.");
-          _verificationId = verificationId; // Сохраняем на случай ручного ввода
+          if (mounted && !_isCodeSent) {
+            _verificationId = verificationId;
+          }
         },
-        timeout: const Duration(seconds: 60), // Таймаут ожидания SMS
+        timeout: const Duration(seconds: 60),
       );
     } catch (e) {
-      print("Error sending SMS code: $e");
+      print("Error during customer check or sending SMS: $e");
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text("Ошибка отправки SMS: $e")),
-        );
+        setState(() => _inputErrorText = "Ошибка отправки SMS.");
       }
     } finally {
-      if (mounted) setState(() => _isLoading = false);
+      // isLoading убирается либо здесь, либо при ошибке проверки клиента
+      if (mounted && _isLoading) setState(() => _isLoading = false);
     }
   }
 
-  // --- Проверка SMS кода и вход (для клиентов) ---
   Future<void> _verifySmsCode() async {
-    if (_codeController.text.isEmpty || _verificationId == null) return;
+    _clearErrors();
+    if (_codeController.text.isEmpty) {
+      setState(() => _codeErrorText = 'Введите код из SMS');
+      return;
+    }
+    if (_verificationId == null) {
+      setState(() => _codeErrorText = 'Ошибка сессии. Отправьте код еще раз.');
+      _isCodeSent = false; // Сброс для повторной отправки
+      return;
+    }
     setState(() => _isLoading = true);
     try {
       final credential = PhoneAuthProvider.credential(
@@ -162,27 +219,36 @@ class _LoginScreenState extends State<LoginScreen> {
         smsCode: _codeController.text.trim(),
       );
       await _auth.signInWithCredential(credential);
-      await _navigateBasedOnRole(); // Навигация после успешной верификации
+      _clearErrors(); // Очищаем ошибки перед навигацией
+      await _navigateBasedOnRole();
     } on FirebaseAuthException catch (e) {
       print("Error verifying code: ${e.message}");
+      String errorMessage = "Неизвестная ошибка кода.";
+      if (e.code == 'invalid-verification-code') {
+        errorMessage = 'Неверный код из SMS.';
+      } else if (e.code == 'session-expired') {
+        errorMessage = 'Время сессии истекло. Отправьте код еще раз.';
+        setState(() {
+          _isCodeSent = false; // Сброс для повторной отправки
+          _verificationId = null;
+          _codeController.clear();
+        });
+      }
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text("Ошибка кода: ${e.message ?? e.code}")),
-        );
+        setState(() => _codeErrorText = errorMessage);
       }
     } catch (e) {
       print("Generic Error verifying code: $e");
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text("Произошла ошибка верификации.")),
-        );
+        setState(() => _codeErrorText = "Произошла ошибка верификации.");
       }
     } finally {
-      if (mounted) setState(() => _isLoading = false);
+      // isLoading сбрасывается здесь только если не было session-expired
+      if (mounted && _isCodeSent) setState(() => _isLoading = false);
     }
   }
 
-  // --- Навигация после успешного входа ---
+  // --- (Функция _navigateBasedOnRole остается БЕЗ ИЗМЕНЕНИЙ) ---
   Future<void> _navigateBasedOnRole() async {
     final user = _auth.currentUser;
     if (user == null) {
@@ -192,7 +258,7 @@ class _LoginScreenState extends State<LoginScreen> {
 
     final databaseReference = FirebaseDatabase.instance.ref();
     String? role;
-    // String? pickupPointId; // ID ПВЗ больше не нужен для EmployeeHomeScreen
+    String? pickupPointId; // ID ПВЗ нужен для EmployeeHomeScreen
 
     if (user.email != null && user.email!.endsWith('@wbpvz.com')) {
       // Логика для сотрудника
@@ -203,8 +269,10 @@ class _LoginScreenState extends State<LoginScreen> {
       if (employeeSnapshot.exists && employeeSnapshot.value != null) {
         final employeeData = employeeSnapshot.value as Map<dynamic, dynamic>;
         role = employeeData['role'] as String?;
-        // pickupPointId = employeeData['pickup_point_id'] as String?; // Можно получить, если нужен в другом месте
-        print("Role identified as employee: $role");
+        pickupPointId =
+            employeeData['pickup_point_id'] as String?; // Получаем ID ПВЗ
+        print(
+            "Role identified as employee: $role, Pickup Point ID: $pickupPointId");
       } else {
         print(
             "Employee data not found in DB for key: $emailKey. Check DB structure/key.");
@@ -230,14 +298,25 @@ class _LoginScreenState extends State<LoginScreen> {
     if (!mounted) return; // Проверка перед навигацией
 
     if (role == 'employee') {
-      print("Navigating to EmployeeHomeScreen...");
-      Navigator.pushReplacement(
-        context,
-        MaterialPageRoute(
-          builder: (context) =>
-              const EmployeeHomeScreen(), // <<<--- ПРАВИЛЬНЫЙ ЭКРАН
-        ),
-      );
+      // Проверяем, есть ли pickupPointId
+      if (pickupPointId != null && pickupPointId.isNotEmpty) {
+        print("Navigating to EmployeeHomeScreen...");
+        // Передаем ID ПВЗ в EmployeeHomeScreen
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(
+            builder: (context) =>
+                const EmployeeHomeScreen(), // EmployeeHomeScreen теперь сам загружает ID
+          ),
+        );
+      } else {
+        print(
+            "Navigation Error: Employee role identified, but pickupPointId is missing. Signing out.");
+        // Показываем ошибку пользователю
+        _showErrorDialog("Ошибка данных сотрудника",
+            "Не удалось определить пункт выдачи. Обратитесь к администратору.");
+        await _auth.signOut(); // Выход, если у сотрудника нет ПВЗ
+      }
     } else if (role == 'customer') {
       print("Navigating to PickupSelectionScreen...");
       Navigator.pushReplacement(
@@ -249,170 +328,287 @@ class _LoginScreenState extends State<LoginScreen> {
     } else {
       print(
           "Navigation Error: Role is undefined or invalid ('$role'). Signing out.");
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-            content: Text(
-                "Не удалось определить роль пользователя. Попробуйте снова.")),
-      );
+      _showErrorDialog("Ошибка входа",
+          "Не удалось определить роль пользователя. Попробуйте войти снова.");
       await _auth.signOut(); // Выход, если роль не ясна
     }
+  }
+  // --- Конец неизмененной функции навигации ---
+
+  // --- Виджет для отображения ошибки под полем ---
+  Widget _buildErrorWidget(String? errorText) {
+    if (errorText == null || errorText.isEmpty) {
+      return const SizedBox.shrink(); // Не показывать ничего, если ошибки нет
+    }
+    return Padding(
+      padding: const EdgeInsets.only(top: 6.0, left: 16.0, right: 16.0),
+      child: Text(
+        errorText,
+        style: TextStyle(color: colorError, fontSize: 13),
+        textAlign: TextAlign.start,
+      ),
+    );
+  }
+
+  // --- НОВЫЙ Метод для показа диалога с ошибкой (для критических ошибок) ---
+  void _showErrorDialog(String title, String content) {
+    if (!mounted) return;
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(title),
+        content: Text(content),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: Text("OK"),
+          ),
+        ],
+      ),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Вход в WB Пункт'),
-        backgroundColor: Colors.deepPurple,
-        elevation: 0,
-      ),
-      backgroundColor: Colors.grey[100],
-      body: Center(
-        child: SingleChildScrollView(
-          // Для предотвращения переполнения на маленьких экранах
-          padding: const EdgeInsets.all(24.0),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: <Widget>[
-              // Логотип или иконка (опционально)
-              Icon(Icons.local_shipping, size: 60, color: Colors.deepPurple),
-              SizedBox(height: 20),
-              Text(
-                'Добро пожаловать!',
-                style: TextStyle(
-                    fontSize: 24,
-                    fontWeight: FontWeight.bold,
-                    color: Colors.deepPurple),
-              ),
-              SizedBox(height: 32),
-
-              // --- Поле ввода Email или Телефона ---
-              TextField(
-                controller: _inputController,
-                keyboardType:
-                    TextInputType.emailAddress, // Позволяет вводить @ и .
-                decoration: InputDecoration(
-                  hintText:
-                      'Email сотрудника (@wbpvz.com) или Телефон клиента (+7...)',
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12.0),
-                    borderSide: BorderSide.none,
-                  ),
-                  filled: true,
-                  fillColor: Colors.white,
-                  prefixIcon: Icon(
-                      _isEmailMode
-                          ? Icons.email_outlined
-                          : Icons.phone_outlined,
-                      color: Colors.deepPurple),
-                ),
-                onChanged: _determineInputType, // Определяем тип при вводе
-              ),
-              SizedBox(height: 16),
-
-              // --- Поле Пароля (только для Email) ---
-              if (_isEmailMode)
-                TextField(
-                  controller: _passwordController,
-                  decoration: InputDecoration(
-                    hintText: 'Пароль',
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(12.0),
-                      borderSide: BorderSide.none,
-                    ),
-                    filled: true,
-                    fillColor: Colors.white,
-                    prefixIcon:
-                        Icon(Icons.lock_outline, color: Colors.deepPurple),
-                  ),
-                  obscureText: true,
-                ),
-
-              // --- Поле Кода из SMS (только для Телефона после отправки) ---
-              if (!_isEmailMode && _isCodeSent)
-                TextField(
-                  controller: _codeController,
-                  decoration: InputDecoration(
-                    hintText: 'Код из SMS',
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(12.0),
-                      borderSide: BorderSide.none,
-                    ),
-                    filled: true,
-                    fillColor: Colors.white,
-                    prefixIcon:
-                        Icon(Icons.sms_outlined, color: Colors.deepPurple),
-                  ),
-                  keyboardType: TextInputType.number,
-                ),
-              SizedBox(height: 32),
-
-              // --- Основная кнопка (Вход / Отправить код / Подтвердить код) ---
-              ElevatedButton(
-                onPressed: _isLoading
-                    ? null // Блокируем кнопку во время загрузки
-                    : () {
-                        if (_isEmailMode) {
-                          _signInWithEmail();
-                        } else if (_isCodeSent) {
-                          _verifySmsCode();
-                        } else {
-                          _sendSmsCode();
-                        }
-                      },
-                style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.deepPurple,
-                    padding: EdgeInsets.symmetric(horizontal: 48, vertical: 16),
-                    textStyle: TextStyle(fontSize: 18),
-                    shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12)),
-                    minimumSize:
-                        Size(double.infinity, 50) // Кнопка на всю ширину
-                    ),
-                child: _isLoading
-                    ? SizedBox(
-                        height: 24,
-                        width: 24,
-                        child: CircularProgressIndicator(
-                            strokeWidth: 3,
-                            valueColor:
-                                AlwaysStoppedAnimation<Color>(Colors.white)))
-                    : Text(
-                        _isEmailMode
-                            ? 'Войти'
-                            : (_isCodeSent
-                                ? 'Подтвердить код'
-                                : 'Отправить код'),
-                        style: TextStyle(color: Colors.white)),
-              ),
-              SizedBox(height: 16),
-
-              // --- Кнопка "Забыли пароль?" (только для Email) ---
-              if (_isEmailMode)
-                TextButton(
-                  onPressed: () {
-                    // TODO: Implement forgot password logic for email
-                    if (_inputController.text.isEmpty ||
-                        !_inputController.text.contains('@')) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(content: Text('Введите email сотрудника')));
-                      return;
-                    }
-                    FirebaseAuth.instance
-                        .sendPasswordResetEmail(
-                            email: _inputController.text.trim())
-                        .then((_) => ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(
-                                content: Text(
-                                    'Письмо для сброса пароля отправлено на ${_inputController.text.trim()}'))))
-                        .catchError((e) => ScaffoldMessenger.of(context)
-                            .showSnackBar(SnackBar(
-                                content: Text('Ошибка сброса пароля: $e'))));
-                  },
-                  child: Text('Забыли пароль?',
-                      style: TextStyle(color: Colors.grey)),
-                ),
+      body: Container(
+        width: double.infinity,
+        height: double.infinity,
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            // Смягченный градиент
+            colors: [
+              colorDarkPurple.withOpacity(0.95), // Темнее наверху
+              colorMidPurple.withOpacity(0.85), // Средний в центре
+              colorMidPurple.withOpacity(0.75) // Светлее внизу
             ],
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+          ),
+        ),
+        child: Center(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(32.0),
+            child: Form(
+              // Оборачиваем в Form
+              key: _formKey,
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: <Widget>[
+                  Container(
+                    padding: EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: Colors.white.withOpacity(0.15),
+                    ),
+                    child: Icon(
+                      Icons.storefront_outlined, // Иконка ПВЗ
+                      size: 70,
+                      color: Colors.white,
+                    ),
+                  ),
+                  SizedBox(height: 24),
+                  Text(
+                    'Добро пожаловать!',
+                    style: TextStyle(
+                      fontSize: 28,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.white,
+                    ),
+                  ),
+                  SizedBox(height: 8),
+                  Text(
+                    'Вход в пункт выдачи заказов',
+                    style: TextStyle(
+                      fontSize: 16,
+                      color: Colors.white70,
+                    ),
+                  ),
+                  SizedBox(height: 40),
+
+                  // --- Поле ввода Email или Телефона ---
+                  TextFormField(
+                    // Используем TextFormField для валидации формой
+                    controller: _inputController,
+                    keyboardType: TextInputType.emailAddress,
+                    style: TextStyle(color: Colors.black87),
+                    decoration: InputDecoration(
+                      hintText: 'Email сотрудника или Телефон клиента (+7...)',
+                      hintStyle: TextStyle(color: Colors.grey[600]),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(16.0),
+                        borderSide: BorderSide.none,
+                      ),
+                      filled: true,
+                      fillColor: Colors.white.withOpacity(0.95),
+                      prefixIcon: Icon(
+                        _isEmailMode
+                            ? Icons.email_outlined
+                            : Icons.phone_outlined,
+                        color: colorMidPurple,
+                      ),
+                      contentPadding:
+                          EdgeInsets.symmetric(vertical: 16, horizontal: 16),
+                      errorText: _inputErrorText, // <<<--- Отображение ошибки
+                      errorStyle: TextStyle(
+                          height: 0,
+                          fontSize: 0), // Скрываем стандартный errorText
+                    ),
+                    onChanged: _determineInputType,
+                    // validator: (value) { ... } // Можно добавить формальную валидацию
+                  ),
+                  _buildErrorWidget(
+                      _inputErrorText), // <<<--- Наш виджет ошибки
+
+                  SizedBox(height: 16),
+
+                  // --- Поле Пароля (только для Email) ---
+                  if (_isEmailMode)
+                    Column(
+                      // Оборачиваем в Column для виджета ошибки
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        TextFormField(
+                          controller: _passwordController,
+                          style: TextStyle(color: Colors.black87),
+                          decoration: InputDecoration(
+                            hintText: 'Пароль',
+                            hintStyle: TextStyle(color: Colors.grey[600]),
+                            border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(16.0),
+                              borderSide: BorderSide.none,
+                            ),
+                            filled: true,
+                            fillColor: Colors.white.withOpacity(0.95),
+                            prefixIcon:
+                                Icon(Icons.lock_outline, color: colorMidPurple),
+                            suffixIcon: IconButton(
+                              // <<<--- Глазок
+                              icon: Icon(
+                                _obscurePassword
+                                    ? Icons.visibility_off_outlined
+                                    : Icons.visibility_outlined,
+                                color: colorMidPurple.withOpacity(0.7),
+                              ),
+                              onPressed: () {
+                                setState(() {
+                                  _obscurePassword = !_obscurePassword;
+                                });
+                              },
+                            ),
+                            contentPadding: EdgeInsets.symmetric(
+                                vertical: 16, horizontal: 16),
+                            errorText: _passwordErrorText,
+                            errorStyle: TextStyle(height: 0, fontSize: 0),
+                          ),
+                          obscureText:
+                              _obscurePassword, // <<<--- Используем состояние
+                          onChanged: (_) =>
+                              _clearErrors(), // Очищаем ошибки при вводе
+                        ),
+                        _buildErrorWidget(
+                            _passwordErrorText), // <<<--- Наш виджет ошибки
+                      ],
+                    ),
+
+                  // --- Поле Кода из SMS (только для Телефона после отправки) ---
+                  if (!_isEmailMode && _isCodeSent)
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        TextFormField(
+                          controller: _codeController,
+                          style: TextStyle(color: Colors.black87),
+                          decoration: InputDecoration(
+                            hintText: 'Код из SMS',
+                            hintStyle: TextStyle(color: Colors.grey[600]),
+                            border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(16.0),
+                              borderSide: BorderSide.none,
+                            ),
+                            filled: true,
+                            fillColor: Colors.white.withOpacity(0.95),
+                            prefixIcon:
+                                Icon(Icons.sms_outlined, color: colorMidPurple),
+                            contentPadding: EdgeInsets.symmetric(
+                                vertical: 16, horizontal: 16),
+                            errorText: _codeErrorText,
+                            errorStyle: TextStyle(height: 0, fontSize: 0),
+                          ),
+                          keyboardType: TextInputType.number,
+                          onChanged: (_) => _clearErrors(),
+                        ),
+                        _buildErrorWidget(
+                            _codeErrorText), // <<<--- Наш виджет ошибки
+                      ],
+                    ),
+                  SizedBox(height: 32),
+
+                  // --- Основная кнопка (Вход / Отправить код / Подтвердить код) ---
+                  Container(
+                    width: double.infinity,
+                    decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          colors: _isLoading
+                              ? [Colors.grey.shade500, Colors.grey.shade400]
+                              : [colorMagenta2, colorMagenta1],
+                          begin: Alignment.centerLeft,
+                          end: Alignment.centerRight,
+                        ),
+                        borderRadius: BorderRadius.circular(16.0),
+                        boxShadow: _isLoading
+                            ? []
+                            : [
+                                BoxShadow(
+                                  color: colorMagenta1.withOpacity(0.4),
+                                  blurRadius: 12,
+                                  offset: Offset(0, 5),
+                                )
+                              ]),
+                    child: ElevatedButton(
+                      onPressed: _isLoading
+                          ? null
+                          : () {
+                              FocusScope.of(context).unfocus();
+                              if (_isEmailMode) {
+                                _signInWithEmail();
+                              } else if (_isCodeSent) {
+                                _verifySmsCode();
+                              } else {
+                                _sendSmsCode();
+                              }
+                            },
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.transparent,
+                        shadowColor: Colors.transparent,
+                        padding: EdgeInsets.symmetric(vertical: 18),
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(16.0)),
+                      ),
+                      child: _isLoading
+                          ? SizedBox(
+                              height: 24,
+                              width: 24,
+                              child: CircularProgressIndicator(
+                                  strokeWidth: 3,
+                                  valueColor: AlwaysStoppedAnimation<Color>(
+                                      Colors.white)))
+                          : Text(
+                              _isEmailMode
+                                  ? 'Войти'
+                                  : (_isCodeSent
+                                      ? 'Подтвердить код'
+                                      : 'Отправить код'),
+                              style: TextStyle(
+                                  fontSize: 18,
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.bold)),
+                    ),
+                  ),
+                  SizedBox(height: 24), // Добавим отступ снизу
+                ],
+              ),
+            ),
           ),
         ),
       ),

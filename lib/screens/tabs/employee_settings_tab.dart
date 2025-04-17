@@ -7,7 +7,6 @@ import '../login_screen.dart'; // <<<--- ДОБАВЛЕН НУЖНЫЙ ИМПО�
 
 class EmployeeSettingsTab extends StatefulWidget {
   const EmployeeSettingsTab({Key? key}) : super(key: key);
-
   @override
   State<EmployeeSettingsTab> createState() => _EmployeeSettingsTabState();
 }
@@ -28,6 +27,11 @@ class _EmployeeSettingsTabState extends State<EmployeeSettingsTab> {
   List<String> _currentServices = [];
   final _newServiceController = TextEditingController();
 
+  // Цвета
+  final Color primaryColor = Color(0xFF7F00FF);
+  final Color cardColor = Colors.white;
+  final Color backgroundColor = Colors.grey[100]!;
+
   @override
   void initState() {
     super.initState();
@@ -36,6 +40,7 @@ class _EmployeeSettingsTabState extends State<EmployeeSettingsTab> {
 
   @override
   void dispose() {
+    /* ... очистка контроллеров ... */
     _nameController.dispose();
     _addressController.dispose();
     _phoneFormattedController.dispose();
@@ -202,153 +207,129 @@ class _EmployeeSettingsTabState extends State<EmployeeSettingsTab> {
     // Не нужно делать setState(_isLoading = false) здесь, так как мы уходим с экрана
   }
 
+  // --- Вспомогательная функция для показа SnackBar ошибок ---
+  void _showErrorSnackBar(String message) {
+    if (mounted) {
+      ScaffoldMessenger.of(context).removeCurrentSnackBar();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(message), backgroundColor: Colors.redAccent),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: backgroundColor, // Светлый фон
       appBar: AppBar(
-        title: const Text('Настройки ПВЗ'),
-        backgroundColor: Colors.deepPurple,
-        // Кнопку выхода можно оставить и здесь, ИЛИ ТОЛЬКО ВНИЗУ
-        // actions: [
-        //   IconButton(
-        //      icon: Icon(Icons.logout),
-        //      tooltip: 'Выйти',
-        //      onPressed: _signOut,
-        //   )
-        // ],
+        title: const Text('Настройки'),
+        backgroundColor: primaryColor, // Фирменный AppBar
+        elevation: 1.0,
       ),
       body: _isLoading
-          ? const Center(child: CircularProgressIndicator())
-          : _pickupPointDetails == null
-              ? Center(
-                  child: Padding(
-                  padding: const EdgeInsets.all(20.0),
-                  child: Text(
-                    'Не удалось загрузить данные пункта выдачи. Проверьте ваше подключение или попробуйте войти снова.',
-                    textAlign: TextAlign.center,
-                  ),
-                ))
+          ? Center(child: CircularProgressIndicator(color: primaryColor))
+          : _employee == null || _pickupPointDetails == null // Проверка на null
+              ? _buildErrorState() // Показываем состояние ошибки
               : GestureDetector(
-                  // Добавляем GestureDetector для скрытия клавиатуры по тапу вне полей
                   onTap: () => FocusScope.of(context).unfocus(),
                   child: ListView(
+                    // Используем ListView для скролла
                     padding: const EdgeInsets.all(16.0),
                     children: [
-                      // --- Основная информация ---
-                      Text('Основная информация',
-                          style: Theme.of(context).textTheme.titleLarge),
-                      _buildTextField(
-                          _nameController, 'Название пункта выдачи'),
-                      _buildTextField(_addressController, 'Адрес'),
-                      _buildTextField(
-                          _phoneFormattedController, 'Телефон (для клиента)'),
-                      _buildTextField(
-                          _workingHoursController, 'Часы работы (текст)'),
-                      _buildTextField(
-                          _descriptionController, 'Краткое описание',
-                          maxLines: 3),
-                      const Divider(height: 30),
+                      // --- Блок: Информация о Сотруднике ---
+                      _buildInfoCard(
+                          icon: Icons.person_pin_circle_outlined,
+                          title: 'Сотрудник',
+                          children: [
+                            _buildInfoRow(
+                                'Имя:',
+                                _employee!
+                                    .name), // Используем ! т.к. проверили на null
+                            _buildInfoRow('Email:', _employee!.email),
+                          ]),
+                      const SizedBox(height: 16),
 
-                      // --- Услуги ---
-                      Text('Услуги',
-                          style: Theme.of(context).textTheme.titleLarge),
-                      const SizedBox(height: 8),
-                      Row(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Expanded(
-                            child: TextField(
-                              controller: _newServiceController,
-                              decoration: InputDecoration(
-                                hintText: 'Добавить услугу...',
-                                border: OutlineInputBorder(),
-                                contentPadding: EdgeInsets.symmetric(
-                                    horizontal: 12, vertical: 10),
+                      // --- Блок: Управление Пунктом Выдачи ---
+                      _buildInfoCard(
+                          icon: Icons.storefront_outlined,
+                          title: 'Пункт выдачи',
+                          children: [
+                            _buildTextField(
+                                _nameController, 'Название', Icons.title),
+                            _buildTextField(_addressController, 'Адрес',
+                                Icons.location_on_outlined),
+                            _buildTextField(_phoneFormattedController,
+                                'Телефон (для клиента)', Icons.phone_outlined),
+                            _buildTextField(_workingHoursController,
+                                'Часы работы (текст)', Icons.access_time),
+                            _buildTextField(_descriptionController,
+                                'Краткое описание', Icons.description_outlined,
+                                maxLines: 3),
+                            const SizedBox(height: 16),
+                            // Управление услугами
+                            Text('Услуги:',
+                                style: TextStyle(
+                                    fontSize: 15,
+                                    fontWeight: FontWeight.w500,
+                                    color: Colors.grey[700])),
+                            const SizedBox(height: 8),
+                            _buildServiceManager(), // Выносим управление услугами в отдельный виджет
+                            const SizedBox(height: 16),
+                            // Кнопка Сохранить ПВЗ
+                            Center(
+                              child: ElevatedButton.icon(
+                                icon: _isSaving
+                                    ? SizedBox(
+                                        width: 18,
+                                        height: 18,
+                                        child: CircularProgressIndicator(
+                                            strokeWidth: 2,
+                                            color: Colors.white))
+                                    : Icon(Icons.save_alt_outlined, size: 20),
+                                label: Text(_isSaving
+                                    ? 'Сохранение...'
+                                    : 'Сохранить данные ПВЗ'),
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: _isSaving
+                                      ? Colors.grey
+                                      : Colors.green.shade600,
+                                  foregroundColor: Colors.white,
+                                  padding: EdgeInsets.symmetric(
+                                      horizontal: 24, vertical: 12),
+                                  shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(10)),
+                                ),
+                                onPressed: _isSaving ? null : _saveChanges,
                               ),
-                              onSubmitted: (_) => _addService(),
                             ),
-                          ),
-                          SizedBox(width: 8),
-                          Padding(
-                            padding: const EdgeInsets.only(
-                                top: 4.0), // Выровнять кнопку по вертикали
-                            child: IconButton(
-                              icon: Icon(Icons.add_circle,
-                                  color: Colors.deepPurple, size: 30),
-                              onPressed: _addService,
-                              tooltip: 'Добавить услугу',
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 8),
-                      _currentServices.isEmpty
-                          ? Padding(
-                              padding:
-                                  const EdgeInsets.symmetric(vertical: 8.0),
-                              child: Text('Услуги пока не добавлены.',
-                                  style: TextStyle(color: Colors.grey)),
-                            )
-                          : Wrap(
-                              spacing: 8.0,
-                              runSpacing: 0.0, // Уменьшаем вертикальный отступ
-                              children: _currentServices
-                                  .map((service) => Chip(
-                                        label: Text(service),
-                                        deleteIcon:
-                                            Icon(Icons.cancel, size: 18),
-                                        onDeleted: () =>
-                                            _removeService(service),
-                                        padding: EdgeInsets.symmetric(
-                                            horizontal: 6,
-                                            vertical: 0), // Уменьшаем padding
-                                        labelPadding: EdgeInsets.only(
-                                            left: 8), // Отступ слева для текста
-                                      ))
-                                  .toList(),
-                            ),
-                      const Divider(height: 30),
+                          ]),
+                      const SizedBox(height: 16),
 
-                      // --- Кнопка сохранения ---
-                      Center(
-                        child: ElevatedButton.icon(
-                          icon: _isSaving
-                              ? SizedBox(
-                                  width: 20,
-                                  height: 20,
-                                  child: CircularProgressIndicator(
-                                      strokeWidth: 2, color: Colors.white))
-                              : Icon(Icons.save_alt),
-                          label: Text(_isSaving
-                              ? 'Сохранение...'
-                              : 'Сохранить изменения'),
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: _isSaving
-                                ? Colors.grey
-                                : Colors.green, // Цвет кнопки при сохранении
-                            padding: EdgeInsets.symmetric(
-                                horizontal: 30, vertical: 15),
-                          ),
-                          onPressed: _isSaving
-                              ? null
-                              : _saveChanges, // Блокируем кнопку во время сохранения
-                        ),
-                      ),
-                      const SizedBox(height: 40), // Отступ
-
-                      // --- Кнопка Выхода ---
-                      Center(
-                        child: OutlinedButton.icon(
-                          icon: Icon(Icons.logout, color: Colors.red),
-                          label: Text('Выйти из аккаунта',
-                              style: TextStyle(color: Colors.red)),
-                          style: OutlinedButton.styleFrom(
-                            side:
-                                BorderSide(color: Colors.red.withOpacity(0.5)),
-                          ),
-                          onPressed: _signOut,
-                        ),
-                      ),
+                      // --- Блок: Управление Аккаунтом ---
+                      _buildInfoCard(
+                          icon: Icons.manage_accounts_outlined,
+                          title: 'Аккаунт',
+                          children: [
+                            // Кнопка Выхода
+                            Center(
+                              child: OutlinedButton.icon(
+                                icon: Icon(Icons.logout,
+                                    color: Colors.red.shade400),
+                                label: Text('Выйти из аккаунта',
+                                    style:
+                                        TextStyle(color: Colors.red.shade400)),
+                                style: OutlinedButton.styleFrom(
+                                  side: BorderSide(
+                                      color: Colors.red.withOpacity(0.4)),
+                                  shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(10)),
+                                  padding: EdgeInsets.symmetric(
+                                      vertical: 12, horizontal: 24),
+                                ),
+                                onPressed: _signOut,
+                              ),
+                            ),
+                          ]),
                       const SizedBox(height: 20), // Нижний отступ
                     ],
                   ),
@@ -356,8 +337,98 @@ class _EmployeeSettingsTabState extends State<EmployeeSettingsTab> {
     );
   }
 
-  // Вспомогательный метод для создания TextField
-  Widget _buildTextField(TextEditingController controller, String label,
+  // --- Виджет для состояния ошибки ---
+  Widget _buildErrorState() {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(30.0),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(Icons.error_outline, color: Colors.red[300], size: 50),
+            SizedBox(height: 16),
+            Text(
+                'Не удалось загрузить данные сотрудника или пункта выдачи. Проверьте подключение или попробуйте войти снова.',
+                textAlign: TextAlign.center,
+                style: TextStyle(fontSize: 16, color: Colors.grey[700])),
+            SizedBox(height: 20),
+            ElevatedButton.icon(
+              icon: Icon(Icons.refresh),
+              label: Text('Попробовать снова'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: primaryColor,
+                foregroundColor: Colors.white,
+              ),
+              onPressed: _loadInitialData,
+            )
+          ],
+        ),
+      ),
+    );
+  }
+
+  // --- Виджет для Информационной Карточки/Секции ---
+  Widget _buildInfoCard(
+      {required IconData icon,
+      required String title,
+      required List<Widget> children}) {
+    return Card(
+      elevation: 2.0,
+      color: cardColor,
+      margin: EdgeInsets.zero, // Убираем внешние отступы Card
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      child: Padding(
+        padding: const EdgeInsets.all(16.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              // Заголовок с иконкой
+              children: [
+                Icon(icon, color: primaryColor, size: 22),
+                const SizedBox(width: 10),
+                Text(title,
+                    style: TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.black87)),
+              ],
+            ),
+            const Divider(height: 20, thickness: 0.5), // Разделитель
+            ...children, // Вставляем дочерние виджеты
+          ],
+        ),
+      ),
+    );
+  }
+
+  // --- Виджет для строки Информации (нередактируемой) ---
+  Widget _buildInfoRow(String label, String value) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 5.0),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(
+              width: 80,
+              child: Text(label,
+                  style: TextStyle(
+                      color: Colors.grey[600],
+                      fontSize: 14))), // Фиксированная ширина метки
+          Expanded(
+              child: Text(value,
+                  style: TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w500,
+                      color: Colors.black87))),
+        ],
+      ),
+    );
+  }
+
+  // --- Виджет для Поля Ввода ---
+  Widget _buildTextField(
+      TextEditingController controller, String label, IconData? icon,
       {int maxLines = 1}) {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 8.0),
@@ -365,11 +436,94 @@ class _EmployeeSettingsTabState extends State<EmployeeSettingsTab> {
         controller: controller,
         decoration: InputDecoration(
           labelText: label,
-          border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-          alignLabelWithHint: true, // Для многострочных полей
+          prefixIcon: icon != null
+              ? Icon(icon, color: Colors.grey[500], size: 20)
+              : null, // Иконка слева
+          border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(10),
+              borderSide: BorderSide(color: Colors.grey[300]!)),
+          enabledBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(10),
+              borderSide: BorderSide(color: Colors.grey[300]!)),
+          focusedBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(10),
+              borderSide: BorderSide(color: primaryColor, width: 1.5)),
+          alignLabelWithHint: maxLines > 1,
+          contentPadding: EdgeInsets.symmetric(
+              vertical: 12, horizontal: 12), // Паддинги внутри поля
         ),
         maxLines: maxLines,
+        style: TextStyle(fontSize: 14), // Размер текста в поле
       ),
     );
   }
-}
+
+  // --- Виджет для Управления Услугами ---
+  Widget _buildServiceManager() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        // Поле и кнопка добавления
+        Row(
+          children: [
+            Expanded(
+              child: TextField(
+                controller: _newServiceController,
+                decoration: InputDecoration(
+                  hintText: 'Новая услуга...',
+                  border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                      borderSide: BorderSide(color: Colors.grey[300]!)),
+                  enabledBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                      borderSide: BorderSide(color: Colors.grey[300]!)),
+                  contentPadding:
+                      EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                  isDense: true, // Компактное поле
+                ),
+                style: TextStyle(fontSize: 13),
+                onSubmitted: (_) => _addService(),
+              ),
+            ),
+            IconButton(
+              icon: Icon(Icons.add_circle_outline, color: primaryColor),
+              tooltip: 'Добавить услугу',
+              visualDensity: VisualDensity.compact,
+              onPressed: _addService,
+            ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        // Список текущих услуг в виде Chip
+        _currentServices.isEmpty
+            ? Padding(
+                padding: const EdgeInsets.symmetric(vertical: 8.0),
+                child: Text('Услуги не добавлены.',
+                    style: TextStyle(color: Colors.grey[600], fontSize: 13)),
+              )
+            : Wrap(
+                // Используем Wrap для переноса Chip'ов
+                spacing: 6.0, // Горизонтальный отступ
+                runSpacing: 0.0, // Вертикальный отступ
+                children: _currentServices
+                    .map((service) => Chip(
+                          label: Text(service, style: TextStyle(fontSize: 12)),
+                          deleteIcon: Icon(Icons.cancel_outlined,
+                              size: 16), // Иконка удаления
+                          onDeleted: () => _removeService(service),
+                          materialTapTargetSize:
+                              MaterialTapTargetSize.shrinkWrap,
+                          padding:
+                              EdgeInsets.symmetric(horizontal: 6, vertical: 0),
+                          backgroundColor: Colors.grey[200], // Фон Chip'а
+                          shape: RoundedRectangleBorder(
+                              borderRadius:
+                                  BorderRadius.circular(6)), // Скругление
+                          side: BorderSide.none, // Без рамки
+                        ))
+                    .toList(),
+              ),
+      ],
+    );
+  }
+} // Конец класса _EmployeeSettingsTabState
